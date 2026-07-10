@@ -31,6 +31,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const [bt, setBt] = useState({ busy:false, res:null });
   const prevDirRef = useRef(0);
   const lastAlertRef = useRef({ dir:0, t:0, bar:null });
+  const pbAlertRef = useRef({ key:null, t:0 });
   const [focus, setFocus] = useState(null);
   const aliveRef = useRef(true);
   useEffect(() => () => { aliveRef.current = false; }, []);
@@ -259,15 +260,48 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     return computeSignal(candlesSafe, ind, emaData, patterns, hasVol, null, srWithHtf);
   }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.waitPullback, prefs.smc, item.sym]);
   const sigLevels = useMemo(() => {
-    if(!signal || signal.dir === 0 || !signal.levels) return null;
-    const L = signal.levels;
-    return [
-      { p: L.entry, label: 'ENTRY', color: '#cfe4e0' },
-      { p: L.sl,    label: 'SL',    color: '#ff6b5e' },
-      { p: L.tp1,   label: 'TP1',   color: '#2fd6ae' },
-      { p: L.tp2,   label: 'TP2',   color: 'rgba(47,214,174,.65)' },
-    ];
+    const out = [];
+    if(signal && signal.dir !== 0 && signal.levels){
+      const L = signal.levels;
+      out.push(
+        { p: L.entry, label: 'ENTRY', color: '#cfe4e0' },
+        { p: L.sl,    label: 'SL',    color: '#ff6b5e' },
+        { p: L.tp1,   label: 'TP1',   color: '#2fd6ae' },
+        { p: L.tp2,   label: 'TP2',   color: 'rgba(47,214,174,.65)' },
+      );
+    }
+    const pb = signal && signal.pullback;
+    if(pb && pb.active && pb.state !== 'invalidated'){
+      out.push(
+        { p: pb.zone.hi, label: '',            color: 'rgba(255,201,77,.3)' },
+        { p: pb.zone.lo, label: '',            color: 'rgba(255,201,77,.3)' },
+        { p: pb.entry,   label: 'PB ' + pb.grade, color: '#ffc94d' },
+      );
+    }
+    return out.length ? out : null;
   }, [signal]);
+
+  /* powiadomienie, gdy cena zbliża się do strefy wejścia po korekcie */
+  useEffect(() => {
+    const pb = signal && signal.pullback;
+    if(!pb || !pb.active || !pb.live) return;
+    if(prefs.pbAlert === false) return;
+    if(pb.state !== 'approaching' && pb.state !== 'in_zone') return;
+    const key = pb.dir + '|' + pb.state + '|' + fmtPrice(pb.entry);
+    const la = pbAlertRef.current;
+    if(la.key === key && (Date.now() - la.t) < 10*60*1000) return;
+    pbAlertRef.current = { key, t: Date.now() };
+    const dtxt = pb.dir > 0 ? 'LONG' : 'SHORT';
+    const top = pb.factors.slice(0, 3).map(f => f.label).join(' + ');
+    const head = pb.state === 'in_zone'
+      ? '🎯 ' + item.sym + ' — cena W STREFIE wejścia (' + dtxt + ')'
+      : '👀 ' + item.sym + ' — zbliża się do wejścia po korekcie (' + dtxt + ')';
+    const msg = 'Wejście ~' + fmtPrice(pb.entry) + ' (' + top + ') · pewność ' + pb.confidence
+      + '% [' + pb.grade + '] · cel ' + fmtPrice(pb.target) + ' · RR ' + pb.rr
+      + (pb.state === 'in_zone' ? ' — potwierdź reakcję' : '');
+    if(prefs.alert !== false) notifyUser(head, msg);
+    Bus.show(head);
+  }, [signal, prefs.pbAlert, prefs.alert, item.sym]);
 
   /* Faza 5: druga opinia AI */
   const runAi = async () => {
@@ -524,6 +558,38 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
           {signal.warns.length > 0 && <span style={{color:'var(--ema9)', fontSize:15}}>⚠</span>}
         </button>
       )}
+
+      {signal && signal.pullback && signal.pullback.active && signal.pullback.state !== 'invalidated' && (() => {
+        const pb = signal.pullback;
+        const dcol = pb.dir > 0 ? '#2fd6ae' : '#ff6b5e';
+        const st = ({
+          watch:       { ic:'👁', txt:'obserwuję',      col:'#8fb0ac' },
+          approaching: { ic:'👀', txt:'zbliża się',      col:'#ffc94d' },
+          in_zone:     { ic:'🎯', txt:'W STREFIE',       col:'#2fd6ae' },
+          below:       { ic:'↓',  txt:'poniżej strefy',  col:'#8fb0ac' },
+        })[pb.state] || { ic:'•', txt:pb.state, col:'#8fb0ac' };
+        return (
+          <div className="sigstrip" style={{ borderColor:'rgba(255,201,77,.4)', background:'rgba(255,201,77,.06)', flexDirection:'column', alignItems:'stretch', gap:6 }}>
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              <span style={{fontWeight:900, fontSize:12.5, color:dcol}}>{pb.dir > 0 ? 'LONG' : 'SHORT'}</span>
+              <span style={{fontSize:11, fontWeight:700, color:'var(--dim)'}}>plan wejścia po korekcie</span>
+              <span style={{flex:1}} />
+              <span className="mono" style={{fontSize:10.5, fontWeight:800, color:st.col}}>{st.ic} {st.txt}</span>
+              <span className="mono" style={{fontSize:10.5, fontWeight:800, padding:'1px 6px', borderRadius:6, color:'#051b21', background:'#ffc94d'}}>{pb.grade} · {pb.confidence}%</span>
+            </div>
+            <div className="mono" style={{display:'flex', alignItems:'center', gap:8, fontSize:11.5}}>
+              <span style={{color:'var(--text)', fontWeight:800}}>wejście ~{fmtPrice(pb.entry)}</span>
+              <span style={{color:'var(--dim2)'}}>cel {fmtPrice(pb.target)} · RR {pb.rr}</span>
+              <span style={{flex:1}} />
+              <span style={{color:'var(--dim)'}}>{pb.distancePct > 0 ? '+' : ''}{pb.distancePct}%</span>
+            </div>
+            <div style={{fontSize:10.5, color:'var(--dim2)', lineHeight:1.5}}>
+              {pb.factors.slice(0, 4).map(f => f.label).join(' · ')}
+              {pb.overextended && pb.reasons.length ? ' — bo ' + pb.reasons.slice(0, 2).join(', ') : ''}
+            </div>
+          </div>
+        );
+      })()}
 
       {candlesSafe.length > 0 && (
         <div style={{display:'flex', gap:8, margin:'4px 16px 2px'}}>

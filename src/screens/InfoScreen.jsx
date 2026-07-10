@@ -80,6 +80,13 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
               Bus.show(nv ? '⏳ Czekaj na cofnięcie: gonione wejścia nie alarmują (chyba że ★ mocne)' : 'Alarmuję też wejścia „w biegu" (z etykietą jakości)');
               return { ...p, waitPullback:nv };
             })}>{prefs.waitPullback ? '⏳ CZEKAJ NA COFNIĘCIE' : '○ Czekaj na cofnięcie'}</button>
+          <button className={'chip mono' + ((prefs.pbAlert !== false) ? ' sel' : ' off')}
+            style={(prefs.pbAlert !== false) ? {color:'var(--ema9)', borderColor:'rgba(255,201,77,.45)'} : null}
+            onClick={() => setPrefs(p => {
+              const nv = !(p.pbAlert !== false);
+              Bus.show(nv ? '🎯 Alert korekty: powiadomię, gdy cena zbliża się do strefy wejścia po cofnięciu' : 'Alert korekty wyłączony');
+              return { ...p, pbAlert:nv };
+            })}>{(prefs.pbAlert !== false) ? '🎯 ALERT KOREKTY' : '○ Alert korekty'}</button>
         </div>
         <div style={{fontSize:11.5, color:'var(--dim2)', marginBottom:6}}>
           Minimalny score wejścia: <b className="mono" style={{color:'var(--text)'}}>±{prefs.minScore != null ? prefs.minScore : 30}</b>
@@ -103,6 +110,12 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
           „Gonienie ruchu" (&gt;1.3×ATR) = cena już uciekła — score jest karany i pojawia się
           ostrzeżenie. <b style={{color:'var(--text)'}}>Czekaj na cofnięcie</b> całkiem wycisza alerty
           o gonionych wejściach (poza sygnałami ★), żebyś wchodził dopiero na pullbacku do strefy.
+          <br/><br/><b style={{color:'var(--ema9)'}}>🎯 Alert korekty</b>: gdy trend trwa, ale cena jest już
+          przewyciągnięta (gonienie / wykupienie / premium), apka wylicza <b style={{color:'var(--text)'}}>strefę
+          najlepszego wejścia po cofnięciu</b> — zbieg poziomów (Fibonacci nogi impulsu, EMA20/50, Order Block,
+          FVG, wsparcie/opór, równowaga 50%, VWAP) — z pewnością, celem, RR i unieważnieniem. Strefa rysuje się
+          na wykresie (żółte linie „PB"), a gdy cena się do niej zbliża (a potem w nią wchodzi) — dostajesz
+          powiadomienie, żeby czekać na potwierdzenie reakcji.
         </div>
       </div>
 

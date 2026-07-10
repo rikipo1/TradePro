@@ -4,6 +4,7 @@ import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, mac
 import { detectPatterns, zigzag } from '../patterns/index.js';
 import { displacement, relativeVolume, smcAnalyze } from '../smc/index.js';
 import { sessionInfo } from '../utils/sessions.js';
+import { buildPullbackPlan } from './pullback.js';
 
 /* ---------------- Faza 4: silnik sygnałów (confluence) ---------------- */
 export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, srOverride){
@@ -436,6 +437,17 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     displacement: smc.disp,
   };
   out.pillarsDetail = { struktura: pillarStruct, lokalizacja: pillarLoc, potwierdzenie: pillarMom };
+
+  /* --- PLAN WEJŚCIA PO KOREKCIE (pullback) — działa niezależnie od tego,
+     czy jest teraz aktywny sygnał: podpowiada gdzie będzie następne dobre
+     wejście, gdy trend trwa, ale cena jest już przewyciągnięta --- */
+  try {
+    out.pullback = buildPullbackPlan({
+      candles, i, price, atr, smc, v20, v50, vw, nearSup, nearRes,
+      htfDir, rangeMode, rsi, adx, isLive,
+    });
+  } catch (e) { out.pullback = null; }
+
   return out;
 }
 

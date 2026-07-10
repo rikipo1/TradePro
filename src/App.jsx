@@ -117,6 +117,7 @@ export function App(){
      nawet gdy ekran instrumentu nie jest otwarty. Dedup + cooldown per symbol.
      Pomija symbol aktualnie otwarty na wykresie (tamten ekran ma własny alert). */
   const bgAlertRef = useRef({});
+  const bgPbRef = useRef({});
   const bgBusyRef = useRef(false);
   useEffect(() => {
     if(!prefs.bgScan || !prefs.alert) return;
@@ -132,7 +133,30 @@ export function App(){
           let res = null;
           try{ res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc); }catch(e){ continue; }
           const sig = res && res.signal;
-          if(!sig || sig.dir === 0) continue;
+          if(!sig) continue;
+
+          /* alert korekty: cena zbliża się do strefy wejścia po cofnięciu
+             (działa nawet gdy nie ma teraz aktywnego sygnału) */
+          if(prefs.pbAlert !== false){
+            const pb = sig.pullback;
+            if(pb && pb.active && (pb.state === 'approaching' || pb.state === 'in_zone')){
+              const key = pb.dir + '|' + pb.state + '|' + fmtPrice(pb.entry);
+              const pst = bgPbRef.current[it.sym];
+              if(!(pst && pst.key === key && (Date.now() - pst.t) < 12*60*1000)){
+                bgPbRef.current[it.sym] = { key, t: Date.now() };
+                const pdir = pb.dir > 0 ? 'LONG' : 'SHORT';
+                const top = pb.factors.slice(0, 3).map(f => f.label).join(' + ');
+                const head = (pb.state === 'in_zone' ? '🎯 ' : '👀 ') + it.sym + ' — '
+                  + (pb.state === 'in_zone' ? 'W STREFIE wejścia' : 'zbliża się do wejścia') + ' po korekcie (' + pdir + ')';
+                notifyUser(head, 'Wejście ~' + fmtPrice(pb.entry) + ' (' + top + ') · pewność '
+                  + pb.confidence + '% · cel ' + fmtPrice(pb.target) + ' · RR ' + pb.rr);
+                Bus.show('[skaner] ' + head);
+                await new Promise(r => setTimeout(r, 300));
+              }
+            }
+          }
+
+          if(sig.dir === 0) continue;
           if(prefs.onlyStrong && !sig.strong) continue;
           if(prefs.waitPullback && sig.entryQuality && sig.entryQuality.chase && !sig.strong) continue;
           const st = bgAlertRef.current[it.sym] || { dir:0, t:0, bar:null };
@@ -161,7 +185,7 @@ export function App(){
     const first = setTimeout(runScan, 4000);
     const h = setInterval(runScan, 45000);
     return () => { clearTimeout(first); clearInterval(h); };
-  }, [prefs.bgScan, prefs.alert, prefs.tf, prefs.source, prefs.onlyStrong, prefs.waitPullback, prefs.minScore, wl, screen, active]);
+  }, [prefs.bgScan, prefs.alert, prefs.pbAlert, prefs.tf, prefs.source, prefs.onlyStrong, prefs.waitPullback, prefs.minScore, wl, screen, active]);
 
   const openChart = (item) => {
     setActive(item);
