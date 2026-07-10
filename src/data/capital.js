@@ -287,7 +287,14 @@ export function capWsStart(epic, onQuote, onState){
           if(m.destination === 'quote' && m.payload && m.payload.epic === epic){
             const b = m.payload.bid;
             const o = (m.payload.ofr != null) ? m.payload.ofr : m.payload.offer;
-            if(b != null && CapWS.onQ) CapWS.onQ((b + (o != null ? o : b))/2);
+            /* KLUCZOWE: wołamy LOKALNY onQuote tej subskrypcji i tylko gdy to
+               NADAL aktywne połączenie (ten ws, ten epic). Bez tego stary,
+               jeszcze zamykający się ws poprzedniego instrumentu potrafił
+               wysłać swój tick przez globalny CapWS.onQ, który wskazywał już
+               na nowy wykres → cena z innego instrumentu na złym wykresie. */
+            if(b != null && CapWS.alive && CapWS.ws === ws && CapWS.epic === epic){
+              onQuote((b + (o != null ? o : b))/2);
+            }
           }
         }catch(e){}
       };

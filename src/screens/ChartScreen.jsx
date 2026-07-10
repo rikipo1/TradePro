@@ -96,6 +96,11 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       if(item.sym !== mySym || tf.id !== myTf) return;
       setData(d => {
         if(!d.candles.length || d.demo || d.sym !== mySym) return d;
+        /* SANITY: odrzuć tick oderwany od świec (>12% od ostatniego close) —
+           to prawie na pewno cena z innego instrumentu (wyciek strumienia),
+           a nie realny ruch. Chroni wykres przed pionowym „skokiem". */
+        const ref = d.candles[d.candles.length-1].c;
+        if(ref && Math.abs(px - ref) / ref > 0.12) return d;
         const cs = d.candles.slice();
         let last = Object.assign({}, cs[cs.length-1]);
         const step = TF_SEC[tf.id] || 300;
