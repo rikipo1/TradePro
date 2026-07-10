@@ -85,6 +85,41 @@ src/
 - **Warstwa UI** (`components`, `screens`, `App.jsx`) to React; ciężki rendering
   wykresu odbywa się na `<canvas>` dla płynności na urządzeniach mobilnych.
 
+## Aplikacja na Androida (APK)
+
+Projekt jest skonfigurowany pod **Capacitor** — z natywnym HTTP (`CapacitorHttp`),
+który omija ograniczenia CORS i daje stabilne notowania na telefonie.
+
+### Najprościej: gotowy APK z GitHub Actions (bez komputera)
+
+Po każdym pushu na `main` workflow **Build Android APK** automatycznie buduje
+plik `.apk`:
+
+1. Wejdź w zakładkę **Actions** w repozytorium → wybierz ostatni przebieg
+   „Build Android APK".
+2. Pobierz gotowy plik z sekcji **Artifacts** (`rikipo-trader-apk`) **lub** z
+   wydania **Releases → „Rikipo Trader — APK (latest)"** (bezpośredni link do
+   `rikipo-trader.apk`).
+3. Otwórz plik na telefonie i zainstaluj (zezwól na „instalację z nieznanych
+   źródeł" dla przeglądarki/menedżera plików).
+
+Build można też odpalić ręcznie: **Actions → Build Android APK → Run workflow**.
+
+### Build lokalny (Android Studio)
+
+Wymaga Android Studio + JDK 17 + Android SDK 34.
+
+```bash
+npm install
+npm run build
+npx cap add android      # jednorazowo — tworzy katalog android/
+npx cap sync android     # kopiuje web build do projektu natywnego
+npx cap open android     # otwiera projekt w Android Studio → Build APK
+```
+
+Katalog `android/` jest generowany na żądanie i celowo nie jest w repozytorium
+(odtwarza go `npx cap add android` oraz workflow CI).
+
 ## Uwaga o notowaniach
 
 Wersja webowa korzysta z publicznych proxy CORS do pobierania danych z Yahoo —

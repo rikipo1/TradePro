@@ -1,0 +1,72 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Java (JDK 17)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Add & sync Android platform
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Build debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk rikipo-trader.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rikipo-trader-apk
+          path: rikipo-trader.apk
+          if-no-files-found: error
+
+      - name: Publish APK to "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: Rikipo Trader — APK (latest)
+          files: rikipo-trader.apk
+          body: |
+            Najnowszy build aplikacji **Rikipo Trader** (debug APK, instalowalny).
+
+            **Instalacja na telefonie:**
+            1. Pobierz plik `rikipo-trader.apk` poniżej.
+            2. Otwórz go — Android poprosi o zgodę na instalację z nieznanych źródeł
+               (włącz ją dla przeglądarki / menedżera plików).
+            3. Zainstaluj i gotowe.
+
+            > Wersja debug — do użytku prywatnego. Nie wymaga sklepu Play.

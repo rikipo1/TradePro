@@ -4,6 +4,13 @@ dist-ssr
 *.local
 .DS_Store
 .vite
+
+# Capacitor / Android (native platform is generated on demand / in CI)
+android
+ios
+*.apk
+.gradle
+.capacitor
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

@@ -1,0 +1,14 @@
+{
+  "appId": "com.rikipo.trader",
+  "appName": "Rikipo Trader",
+  "webDir": "dist",
+  "backgroundColor": "#051b21",
+  "android": {
+    "backgroundColor": "#051b21"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}
