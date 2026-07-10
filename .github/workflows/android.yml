@@ -33,19 +33,19 @@ jobs:
       - name: Build web assets
         run: npm run build
 
-      - name: Add & sync Android platform
-        run: |
-          npx cap add android
-          npx cap sync android
+      - name: Sync Capacitor (copy web build into android/)
+        run: npx cap sync android
 
-      - name: Build debug APK
+      - name: Build signed release APK
+        env:
+          VERSION_CODE: ${{ github.run_number }}
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
 
       - name: Rename APK
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk rikipo-trader.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk rikipo-trader.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -61,12 +61,13 @@ jobs:
           name: Rikipo Trader — APK (latest)
           files: rikipo-trader.apk
           body: |
-            Najnowszy build aplikacji **Rikipo Trader** (debug APK, instalowalny).
+            Najnowszy build aplikacji **Rikipo Trader** — podpisany APK (release).
 
             **Instalacja na telefonie:**
             1. Pobierz plik `rikipo-trader.apk` poniżej.
             2. Otwórz go — Android poprosi o zgodę na instalację z nieznanych źródeł
                (włącz ją dla przeglądarki / menedżera plików).
-            3. Zainstaluj i gotowe.
+            3. Zainstaluj i gotowe. Kolejne wersje zainstalują się „na wierzch"
+               (ten sam podpis), bez odinstalowywania.
 
-            > Wersja debug — do użytku prywatnego. Nie wymaga sklepu Play.
+            > Wersja do użytku prywatnego. Nie wymaga sklepu Play.

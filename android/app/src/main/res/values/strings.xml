@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Rikipo Trader</string>
+    <string name="title_activity_main">Rikipo Trader</string>
+    <string name="package_name">com.rikipo.trader</string>
+    <string name="custom_url_scheme">com.rikipo.trader</string>
+</resources>

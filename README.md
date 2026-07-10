@@ -87,19 +87,21 @@ src/
 
 ## Aplikacja na Androida (APK)
 
-Projekt jest skonfigurowany pod **Capacitor** — z natywnym HTTP (`CapacitorHttp`),
-który omija ograniczenia CORS i daje stabilne notowania na telefonie.
+Projekt jest spakowany jako natywna aplikacja Androida przez **Capacitor** —
+z natywnym HTTP (`CapacitorHttp`), który omija ograniczenia CORS i daje
+stabilne notowania na telefonie. Ma własną **ikonę**, nazwę **Rikipo Trader**
+oraz **stały podpis** (keystore), dzięki któremu kolejne wersje instalują się
+„na wierzch" bez odinstalowywania. Natywny projekt Androida jest w repozytorium
+(katalog `android/`).
 
 ### Najprościej: gotowy APK z GitHub Actions (bez komputera)
 
 Po każdym pushu na `main` workflow **Build Android APK** automatycznie buduje
-plik `.apk`:
+podpisany plik `.apk` (z rosnącym `versionCode` = numer builda):
 
-1. Wejdź w zakładkę **Actions** w repozytorium → wybierz ostatni przebieg
-   „Build Android APK".
-2. Pobierz gotowy plik z sekcji **Artifacts** (`rikipo-trader-apk`) **lub** z
-   wydania **Releases → „Rikipo Trader — APK (latest)"** (bezpośredni link do
-   `rikipo-trader.apk`).
+1. Otwórz **Releases → „Rikipo Trader — APK (latest)"** i pobierz
+   `rikipo-trader.apk` (bezpośredni link), **lub**
+2. **Actions → ostatni przebieg → Artifacts → `rikipo-trader-apk`**.
 3. Otwórz plik na telefonie i zainstaluj (zezwól na „instalację z nieznanych
    źródeł" dla przeglądarki/menedżera plików).
 
@@ -112,13 +114,23 @@ Wymaga Android Studio + JDK 17 + Android SDK 34.
 ```bash
 npm install
 npm run build
-npx cap add android      # jednorazowo — tworzy katalog android/
 npx cap sync android     # kopiuje web build do projektu natywnego
 npx cap open android     # otwiera projekt w Android Studio → Build APK
 ```
 
-Katalog `android/` jest generowany na żądanie i celowo nie jest w repozytorium
-(odtwarza go `npx cap add android` oraz workflow CI).
+### Ikona aplikacji
+
+Ikony launchera (`android/app/src/main/res/mipmap-*`) generowane są ze źródła
+w `brand/` skryptem, bez zależności od chmury. Podgląd: `brand/icon-1024.png`.
+
+### Podpisywanie (keystore)
+
+APK podpisywany jest kluczem z `android/app/rikipo-release.keystore`
+(dane w `android/app/keystore.properties`). Klucz jest w repozytorium celowo —
+to prywatna, sideloadowana aplikacja (nie w sklepie Play), a stały podpis jest
+tym, co pozwala instalować aktualizacje na istniejącą wersję. Jeśli chcesz go
+utrzymać prywatnie, przenieś wartości do **GitHub Secrets** i pozwól workflow
+zapisać `keystore.properties` w trakcie builda.
 
 ## Uwaga o notowaniach
 

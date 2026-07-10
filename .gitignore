@@ -5,11 +5,10 @@ dist-ssr
 .DS_Store
 .vite
 
-# Capacitor / Android (native platform is generated on demand / in CI)
-android
+# Capacitor / Android — the native project is committed; its own
+# android/.gitignore excludes build artifacts (build/, .gradle, *.apk, ...)
 ios
 *.apk
-.gradle
 .capacitor
 npm-debug.log*
 yarn-debug.log*
