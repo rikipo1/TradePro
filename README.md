@@ -125,12 +125,21 @@ w `brand/` skryptem, bez zależności od chmury. Podgląd: `brand/icon-1024.png`
 
 ### Podpisywanie (keystore)
 
-APK podpisywany jest kluczem z `android/app/rikipo-release.keystore`
-(dane w `android/app/keystore.properties`). Klucz jest w repozytorium celowo —
-to prywatna, sideloadowana aplikacja (nie w sklepie Play), a stały podpis jest
-tym, co pozwala instalować aktualizacje na istniejącą wersję. Jeśli chcesz go
-utrzymać prywatnie, przenieś wartości do **GitHub Secrets** i pozwól workflow
-zapisać `keystore.properties` w trakcie builda.
+APK podpisywany jest stałym kluczem trzymanym **prywatnie w GitHub Secrets** —
+klucza nie ma w repozytorium. Workflow odtwarza `android/app/rikipo-release.keystore`
+oraz `android/app/keystore.properties` w trakcie builda z sekretów:
+
+| Sekret | Zawartość |
+| --- | --- |
+| `KEYSTORE_BASE64` | keystore zakodowany w base64 |
+| `KEYSTORE_PASSWORD` | hasło do keystore |
+| `KEY_ALIAS` | alias klucza (`rikipo`) |
+| `KEY_PASSWORD` | hasło do klucza |
+
+Sekrety ustawia się w **Settings → Secrets and variables → Actions**. Stały
+podpis sprawia, że kolejne wersje instalują się „na wierzch". Build lokalny bez
+sekretów wyprodukuje APK niepodpisany (do developmentu) — do instalacji użyj
+APK z CI.
 
 ## Uwaga o notowaniach
 

@@ -36,6 +36,25 @@ jobs:
       - name: Sync Capacitor (copy web build into android/)
         run: npx cap sync android
 
+      - name: Restore signing keystore from secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Brak sekretu KEYSTORE_BASE64. Dodaj 4 sekrety w Settings → Secrets and variables → Actions (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD), potem uruchom workflow ponownie."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/rikipo-release.keystore
+          {
+            echo "storeFile=rikipo-release.keystore"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/app/keystore.properties
+
       - name: Build signed release APK
         env:
           VERSION_CODE: ${{ github.run_number }}
@@ -61,7 +80,8 @@ jobs:
           name: Rikipo Trader — APK (latest)
           files: rikipo-trader.apk
           body: |
-            Najnowszy build aplikacji **Rikipo Trader** — podpisany APK (release).
+            Najnowszy build aplikacji **Rikipo Trader** — podpisany APK (release),
+            klucz trzymany prywatnie w GitHub Secrets.
 
             **Instalacja na telefonie:**
             1. Pobierz plik `rikipo-trader.apk` poniżej.
