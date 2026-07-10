@@ -84,9 +84,9 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
             style={(prefs.pbAlert !== false) ? {color:'var(--ema9)', borderColor:'rgba(255,201,77,.45)'} : null}
             onClick={() => setPrefs(p => {
               const nv = !(p.pbAlert !== false);
-              Bus.show(nv ? '🎯 Alert korekty: powiadomię, gdy cena zbliża się do strefy wejścia po cofnięciu' : 'Alert korekty wyłączony');
+              Bus.show(nv ? '🎯 Alert okazji: powiadomię o dobrych sytuacjach (korekta, odwrócenie, retest wybicia, OB) gdy cena zbliża się do strefy' : 'Alert okazji wyłączony');
               return { ...p, pbAlert:nv };
-            })}>{(prefs.pbAlert !== false) ? '🎯 ALERT KOREKTY' : '○ Alert korekty'}</button>
+            })}>{(prefs.pbAlert !== false) ? '🎯 ALERT OKAZJI' : '○ Alert okazji'}</button>
         </div>
         <div style={{fontSize:11.5, color:'var(--dim2)', marginBottom:6}}>
           Minimalny score wejścia: <b className="mono" style={{color:'var(--text)'}}>±{prefs.minScore != null ? prefs.minScore : 30}</b>
@@ -110,12 +110,16 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
           „Gonienie ruchu" (&gt;1.3×ATR) = cena już uciekła — score jest karany i pojawia się
           ostrzeżenie. <b style={{color:'var(--text)'}}>Czekaj na cofnięcie</b> całkiem wycisza alerty
           o gonionych wejściach (poza sygnałami ★), żebyś wchodził dopiero na pullbacku do strefy.
-          <br/><br/><b style={{color:'var(--ema9)'}}>🎯 Alert korekty</b>: gdy trend trwa, ale cena jest już
-          przewyciągnięta (gonienie / wykupienie / premium), apka wylicza <b style={{color:'var(--text)'}}>strefę
-          najlepszego wejścia po cofnięciu</b> — zbieg poziomów (Fibonacci nogi impulsu, EMA20/50, Order Block,
-          FVG, wsparcie/opór, równowaga 50%, VWAP) — z pewnością, celem, RR i unieważnieniem. Strefa rysuje się
-          na wykresie (żółte linie „PB"), a gdy cena się do niej zbliża (a potem w nią wchodzi) — dostajesz
-          powiadomienie, żeby czekać na potwierdzenie reakcji.
+          <br/><br/><b style={{color:'var(--ema9)'}}>🎯 Alert okazji</b>: obok samego sygnału LONG/SHORT apka szuka
+          <b style={{color:'var(--text)'}}> dobrych sytuacji do wejścia</b> — także gdy jest CZEKAJ. Wykrywa m.in.:
+          <b style={{color:'var(--text)'}}> wejście po korekcie</b> (gdy trend trwa, ale cena jest przewyciągnięta —
+          liczy strefę konfluencji: Fibonacci nogi impulsu, EMA20/50, Order Block, FVG, wsparcie/opór, równowaga 50%, VWAP),
+          <b style={{color:'var(--text)'}}> odwrócenie po zdjęciu płynności</b> (sweep), <b style={{color:'var(--text)'}}>zmianę
+          charakteru (CHOCH)</b> na reteście, <b style={{color:'var(--text)'}}>retest wybicia (BOS)</b>,
+          <b style={{color:'var(--text)'}}> fade z krańca zakresu</b> w konsolidacji oraz <b style={{color:'var(--text)'}}>reakcję na
+          Order Block</b>. Każda okazja ma kierunek, poziom wejścia, pewność (ocena A–D), cel i RR. Najlepsza pokazuje się
+          w pasku pod sygnałem i rysuje na wykresie (żółte linie „⌖"), a pełna lista jest po kliknięciu w sygnał. Gdy cena
+          zbliża się do strefy (a potem w nią wchodzi) — dostajesz powiadomienie, żeby czekać na potwierdzenie reakcji.
         </div>
       </div>
 

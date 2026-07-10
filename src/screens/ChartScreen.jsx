@@ -259,6 +259,13 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     srWithHtf.__smc = prefs.smc || null;
     return computeSignal(candlesSafe, ind, emaData, patterns, hasVol, null, srWithHtf);
   }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.waitPullback, prefs.smc, item.sym]);
+  /* najlepsza „okazja" poza samym aktywnym sygnałem (do paska i alertu) */
+  const topOpp = useMemo(() => {
+    const ops = signal && signal.opportunities;
+    if(!ops || !ops.length) return null;
+    return ops.find(o => o.kind !== 'signal-now') || null;
+  }, [signal]);
+
   const sigLevels = useMemo(() => {
     const out = [];
     if(signal && signal.dir !== 0 && signal.levels){
@@ -270,38 +277,38 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
         { p: L.tp2,   label: 'TP2',   color: 'rgba(47,214,174,.65)' },
       );
     }
-    const pb = signal && signal.pullback;
-    if(pb && pb.active && pb.state !== 'invalidated'){
-      out.push(
-        { p: pb.zone.hi, label: '',            color: 'rgba(255,201,77,.3)' },
-        { p: pb.zone.lo, label: '',            color: 'rgba(255,201,77,.3)' },
-        { p: pb.entry,   label: 'PB ' + pb.grade, color: '#ffc94d' },
-      );
+    const op = topOpp;
+    if(op && op.state !== 'invalidated' && op.entry != null){
+      if(op.zone){
+        out.push(
+          { p: op.zone.hi, label: '', color: 'rgba(255,201,77,.3)' },
+          { p: op.zone.lo, label: '', color: 'rgba(255,201,77,.3)' },
+        );
+      }
+      out.push({ p: op.entry, label: '⌖ ' + op.grade, color: '#ffc94d' });
     }
     return out.length ? out : null;
-  }, [signal]);
+  }, [signal, topOpp]);
 
-  /* powiadomienie, gdy cena zbliża się do strefy wejścia po korekcie */
+  /* powiadomienie, gdy cena zbliża się do strefy dobrej okazji */
   useEffect(() => {
-    const pb = signal && signal.pullback;
-    if(!pb || !pb.active || !pb.live) return;
+    const op = topOpp;
+    if(!op) return;
     if(prefs.pbAlert === false) return;
-    if(pb.state !== 'approaching' && pb.state !== 'in_zone') return;
-    const key = pb.dir + '|' + pb.state + '|' + fmtPrice(pb.entry);
+    if(op.grade === 'D') return;
+    if(op.state !== 'approaching' && op.state !== 'in_zone') return;
+    const key = op.kind + '|' + op.dir + '|' + op.state + '|' + fmtPrice(op.entry);
     const la = pbAlertRef.current;
     if(la.key === key && (Date.now() - la.t) < 10*60*1000) return;
     pbAlertRef.current = { key, t: Date.now() };
-    const dtxt = pb.dir > 0 ? 'LONG' : 'SHORT';
-    const top = pb.factors.slice(0, 3).map(f => f.label).join(' + ');
-    const head = pb.state === 'in_zone'
-      ? '🎯 ' + item.sym + ' — cena W STREFIE wejścia (' + dtxt + ')'
-      : '👀 ' + item.sym + ' — zbliża się do wejścia po korekcie (' + dtxt + ')';
-    const msg = 'Wejście ~' + fmtPrice(pb.entry) + ' (' + top + ') · pewność ' + pb.confidence
-      + '% [' + pb.grade + '] · cel ' + fmtPrice(pb.target) + ' · RR ' + pb.rr
-      + (pb.state === 'in_zone' ? ' — potwierdź reakcję' : '');
+    const dtxt = op.dir > 0 ? 'LONG' : 'SHORT';
+    const head = (op.state === 'in_zone' ? '🎯 ' : '👀 ') + item.sym + ' — ' + op.title + ' (' + dtxt + ')';
+    const extra = (op.target != null ? ' · cel ' + fmtPrice(op.target) : '') + (op.rr != null ? ' · RR ' + op.rr : '');
+    const msg = 'Wejście ~' + fmtPrice(op.entry) + ' · pewność ' + op.confidence + '% [' + op.grade + ']'
+      + extra + (op.state === 'in_zone' ? ' — potwierdź reakcję' : '');
     if(prefs.alert !== false) notifyUser(head, msg);
     Bus.show(head);
-  }, [signal, prefs.pbAlert, prefs.alert, item.sym]);
+  }, [signal, topOpp, prefs.pbAlert, prefs.alert, item.sym]);
 
   /* Faza 5: druga opinia AI */
   const runAi = async () => {
@@ -559,34 +566,38 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
         </button>
       )}
 
-      {signal && signal.pullback && signal.pullback.active && signal.pullback.state !== 'invalidated' && (() => {
-        const pb = signal.pullback;
-        const dcol = pb.dir > 0 ? '#2fd6ae' : '#ff6b5e';
+      {topOpp && topOpp.state !== 'invalidated' && (() => {
+        const op = topOpp;
+        const dcol = op.dir > 0 ? '#2fd6ae' : '#ff6b5e';
         const st = ({
-          watch:       { ic:'👁', txt:'obserwuję',      col:'#8fb0ac' },
-          approaching: { ic:'👀', txt:'zbliża się',      col:'#ffc94d' },
-          in_zone:     { ic:'🎯', txt:'W STREFIE',       col:'#2fd6ae' },
-          below:       { ic:'↓',  txt:'poniżej strefy',  col:'#8fb0ac' },
-        })[pb.state] || { ic:'•', txt:pb.state, col:'#8fb0ac' };
+          watch:       { ic:'👁', txt:'obserwuję', col:'#8fb0ac' },
+          approaching: { ic:'👀', txt:'zbliża się', col:'#ffc94d' },
+          in_zone:     { ic:'🎯', txt:'W STREFIE',  col:'#2fd6ae' },
+          ready:       { ic:'✅', txt:'gotowe',     col:'#2fd6ae' },
+        })[op.state] || { ic:'•', txt:op.state, col:'#8fb0ac' };
+        const dpct = signal && signal.price ? (op.entry - signal.price) / signal.price * 100 : null;
         return (
-          <div className="sigstrip" style={{ borderColor:'rgba(255,201,77,.4)', background:'rgba(255,201,77,.06)', flexDirection:'column', alignItems:'stretch', gap:6 }}>
+          <div className="sigstrip" onClick={() => setShowSig(true)}
+            style={{ borderColor:'rgba(255,201,77,.4)', background:'rgba(255,201,77,.06)', flexDirection:'column', alignItems:'stretch', gap:6 }}>
             <div style={{display:'flex', alignItems:'center', gap:8}}>
-              <span style={{fontWeight:900, fontSize:12.5, color:dcol}}>{pb.dir > 0 ? 'LONG' : 'SHORT'}</span>
-              <span style={{fontSize:11, fontWeight:700, color:'var(--dim)'}}>plan wejścia po korekcie</span>
+              <span style={{fontWeight:900, fontSize:12.5, color:dcol}}>{op.dir > 0 ? 'LONG' : 'SHORT'}</span>
+              <span style={{fontSize:11, fontWeight:700, color:'var(--dim)', minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{op.title}</span>
               <span style={{flex:1}} />
               <span className="mono" style={{fontSize:10.5, fontWeight:800, color:st.col}}>{st.ic} {st.txt}</span>
-              <span className="mono" style={{fontSize:10.5, fontWeight:800, padding:'1px 6px', borderRadius:6, color:'#051b21', background:'#ffc94d'}}>{pb.grade} · {pb.confidence}%</span>
+              <span className="mono" style={{fontSize:10.5, fontWeight:800, padding:'1px 6px', borderRadius:6, color:'#051b21', background:'#ffc94d'}}>{op.grade} · {op.confidence}%</span>
             </div>
             <div className="mono" style={{display:'flex', alignItems:'center', gap:8, fontSize:11.5}}>
-              <span style={{color:'var(--text)', fontWeight:800}}>wejście ~{fmtPrice(pb.entry)}</span>
-              <span style={{color:'var(--dim2)'}}>cel {fmtPrice(pb.target)} · RR {pb.rr}</span>
+              <span style={{color:'var(--text)', fontWeight:800}}>wejście ~{fmtPrice(op.entry)}</span>
+              {op.target != null && <span style={{color:'var(--dim2)'}}>cel {fmtPrice(op.target)}{op.rr != null ? ' · RR ' + op.rr : ''}</span>}
               <span style={{flex:1}} />
-              <span style={{color:'var(--dim)'}}>{pb.distancePct > 0 ? '+' : ''}{pb.distancePct}%</span>
+              {dpct != null && <span style={{color:'var(--dim)'}}>{dpct > 0 ? '+' : ''}{dpct.toFixed(2)}%</span>}
             </div>
-            <div style={{fontSize:10.5, color:'var(--dim2)', lineHeight:1.5}}>
-              {pb.factors.slice(0, 4).map(f => f.label).join(' · ')}
-              {pb.overextended && pb.reasons.length ? ' — bo ' + pb.reasons.slice(0, 2).join(', ') : ''}
-            </div>
+            {((op.factors && op.factors.length) || op.note) && (
+              <div style={{fontSize:10.5, color:'var(--dim2)', lineHeight:1.5}}>
+                {op.factors && op.factors.length ? op.factors.slice(0, 4).join(' · ') : ''}
+                {op.note ? (op.factors && op.factors.length ? ' — ' : '') + op.note : ''}
+              </div>
+            )}
           </div>
         );
       })()}
@@ -737,6 +748,30 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
               {signal.warns.map((w, k) => (
                 <div key={'w'+k} style={{color:'var(--ema9)', fontSize:12.5, padding:'3px 0', lineHeight:1.5}}>⚠ {w}</div>
               ))}
+
+              {signal.opportunities && signal.opportunities.filter(o => o.kind !== 'signal-now').length > 0 && (
+                <>
+                  <div className="section-label" style={{padding:'10px 0 4px', color:'var(--ema9)'}}>🎯 Okazje / co obserwować</div>
+                  {signal.opportunities.filter(o => o.kind !== 'signal-now').map((op, k) => (
+                    <div key={'op'+k} style={{background:'var(--bg)', border:'1px solid rgba(255,201,77,.25)', borderRadius:12, padding:'9px 12px', marginBottom:6}}>
+                      <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:3}}>
+                        <span style={{fontWeight:800, fontSize:12.5, color:op.dir>0?'var(--up)':'var(--down)'}}>{op.dir>0?'LONG':'SHORT'}</span>
+                        <span style={{fontWeight:700, fontSize:13}}>{op.title}</span>
+                        <span style={{flex:1}} />
+                        <span className="mono" style={{fontSize:10.5, fontWeight:800, padding:'1px 6px', borderRadius:6, color:'#051b21', background:'#ffc94d'}}>{op.grade} · {op.confidence}%</span>
+                      </div>
+                      <div className="mono" style={{fontSize:11.5, color:'var(--dim)'}}>
+                        wejście ~{fmtPrice(op.entry)}{op.target != null ? ' · cel ' + fmtPrice(op.target) : ''}{op.rr != null ? ' · RR ' + op.rr : ''}
+                        {op.state ? ' · ' + ({watch:'obserwuję', approaching:'zbliża się', in_zone:'w strefie', ready:'gotowe'}[op.state] || op.state) : ''}
+                      </div>
+                      {op.note && <div style={{fontSize:11, color:'var(--dim2)', marginTop:2, lineHeight:1.5}}>{op.note}</div>}
+                      {op.confirm && op.confirm.length > 0 && (
+                        <div style={{fontSize:10.5, color:'var(--dim2)', marginTop:2}}>potwierdź: {op.confirm.slice(0, 3).join(' · ')}</div>
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
 
               {signal.smc && (
                 <>

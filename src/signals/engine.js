@@ -5,6 +5,7 @@ import { detectPatterns, zigzag } from '../patterns/index.js';
 import { displacement, relativeVolume, smcAnalyze } from '../smc/index.js';
 import { sessionInfo } from '../utils/sessions.js';
 import { buildPullbackPlan } from './pullback.js';
+import { buildOpportunities } from './opportunities.js';
 
 /* ---------------- Faza 4: silnik sygnałów (confluence) ---------------- */
 export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, srOverride){
@@ -447,6 +448,14 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
       htfDir, rangeMode, rsi, adx, isLive,
     });
   } catch (e) { out.pullback = null; }
+
+  /* --- OKAZJE (ogólne) — pullback + odwrócenia/retesty/fade/OB, także w CZEKAJ --- */
+  try {
+    out.opportunities = buildOpportunities({
+      price, atr, smc, nearSup, nearRes, rangeMode, rsi, adx, htfDir,
+      signalDir: out.dir, levels: out.levels, score: out.score, pullback: out.pullback,
+    });
+  } catch (e) { out.opportunities = []; }
 
   return out;
 }

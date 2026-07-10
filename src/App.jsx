@@ -135,21 +135,20 @@ export function App(){
           const sig = res && res.signal;
           if(!sig) continue;
 
-          /* alert korekty: cena zbliża się do strefy wejścia po cofnięciu
-             (działa nawet gdy nie ma teraz aktywnego sygnału) */
-          if(prefs.pbAlert !== false){
-            const pb = sig.pullback;
-            if(pb && pb.active && (pb.state === 'approaching' || pb.state === 'in_zone')){
-              const key = pb.dir + '|' + pb.state + '|' + fmtPrice(pb.entry);
+          /* alert okazji: dobra sytuacja się formuje / cena zbliża się do strefy
+             (działa nawet gdy nie ma teraz aktywnego sygnału LONG/SHORT) */
+          if(prefs.pbAlert !== false && sig.opportunities && sig.opportunities.length){
+            const op = sig.opportunities.find(o => o.kind !== 'signal-now'
+              && o.grade !== 'D' && (o.state === 'approaching' || o.state === 'in_zone'));
+            if(op){
+              const key = op.kind + '|' + op.dir + '|' + op.state + '|' + fmtPrice(op.entry);
               const pst = bgPbRef.current[it.sym];
               if(!(pst && pst.key === key && (Date.now() - pst.t) < 12*60*1000)){
                 bgPbRef.current[it.sym] = { key, t: Date.now() };
-                const pdir = pb.dir > 0 ? 'LONG' : 'SHORT';
-                const top = pb.factors.slice(0, 3).map(f => f.label).join(' + ');
-                const head = (pb.state === 'in_zone' ? '🎯 ' : '👀 ') + it.sym + ' — '
-                  + (pb.state === 'in_zone' ? 'W STREFIE wejścia' : 'zbliża się do wejścia') + ' po korekcie (' + pdir + ')';
-                notifyUser(head, 'Wejście ~' + fmtPrice(pb.entry) + ' (' + top + ') · pewność '
-                  + pb.confidence + '% · cel ' + fmtPrice(pb.target) + ' · RR ' + pb.rr);
+                const pdir = op.dir > 0 ? 'LONG' : 'SHORT';
+                const head = (op.state === 'in_zone' ? '🎯 ' : '👀 ') + it.sym + ' — ' + op.title + ' (' + pdir + ')';
+                const extra = (op.target != null ? ' · cel ' + fmtPrice(op.target) : '') + (op.rr != null ? ' · RR ' + op.rr : '');
+                notifyUser(head, 'Wejście ~' + fmtPrice(op.entry) + ' · pewność ' + op.confidence + '% [' + op.grade + ']' + extra);
                 Bus.show('[skaner] ' + head);
                 await new Promise(r => setTimeout(r, 300));
               }
