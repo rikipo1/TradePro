@@ -118,6 +118,7 @@ export function App(){
      Pomija symbol aktualnie otwarty na wykresie (tamten ekran ma własny alert). */
   const bgAlertRef = useRef({});
   const bgPbRef = useRef({});
+  const bgMacroRef = useRef(null);
   const bgBusyRef = useRef(false);
   useEffect(() => {
     if(!prefs.bgScan || !prefs.alert) return;
@@ -134,6 +135,17 @@ export function App(){
           try{ res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc); }catch(e){ continue; }
           const sig = res && res.signal;
           if(!sig) continue;
+
+          /* powiadomienie o otwarciu okna makro (raz na okno, bez blokady wejść) */
+          if(sig.macroWindow){
+            if(bgMacroRef.current !== sig.macroWindow){
+              bgMacroRef.current = sig.macroWindow;
+              notifyUser('Rikipo Trader — okno makro', 'Otwiera się: ' + sig.macroWindow + ' — podwyższona zmienność. Wejścia niezablokowane, uważaj.');
+              Bus.show('⏰ Okno makro: ' + sig.macroWindow);
+            }
+          } else if(bgMacroRef.current !== null){
+            bgMacroRef.current = null;
+          }
 
           /* alert okazji: dobra sytuacja się formuje / cena zbliża się do strefy
              (działa nawet gdy nie ma teraz aktywnego sygnału LONG/SHORT) */

@@ -32,6 +32,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const prevDirRef = useRef(0);
   const lastAlertRef = useRef({ dir:0, t:0, bar:null });
   const pbAlertRef = useRef({ key:null, t:0 });
+  const macroRef = useRef(null);
   const [focus, setFocus] = useState(null);
   const aliveRef = useRef(true);
   useEffect(() => () => { aliveRef.current = false; }, []);
@@ -309,6 +310,16 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     if(prefs.alert !== false) notifyUser(head, msg);
     Bus.show(head);
   }, [signal, topOpp, prefs.pbAlert, prefs.alert, item.sym]);
+
+  /* powiadomienie, gdy OTWIERA SIĘ okno makro (bez blokady wejść) */
+  useEffect(() => {
+    const mw = signal && signal.macroWindow;
+    if(!mw){ macroRef.current = null; return; }
+    if(macroRef.current === mw) return;
+    macroRef.current = mw;
+    if(prefs.alert !== false) notifyUser('Rikipo Trader — okno makro', 'Otwiera się: ' + mw + ' — podwyższona zmienność. Wejścia niezablokowane, uważaj na szarpnięcia.');
+    Bus.show('⏰ Okno makro: ' + mw);
+  }, [signal, prefs.alert]);
 
   /* Faza 5: druga opinia AI */
   const runAi = async () => {

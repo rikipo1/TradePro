@@ -389,7 +389,7 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     }
   }
 
-  /* okna makro / otwarcia sesji (czas lokalny) — Twoja zasada */
+  /* okna makro / otwarcia sesji (czas lokalny) — INFORMACYJNIE (bez blokady wejść) */
   const dt = new Date();
   const hm = dt.getHours()*60 + dt.getMinutes();
   const wins = [
@@ -401,9 +401,9 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   ];
   for(let q=0;q<wins.length;q++){
     if(hm >= wins[q][0] && hm <= wins[q][1]){
+      out.macroWindow = wins[q][2];
       if(atIdx == null){
-        warns.push('Okno makro: ' + wins[q][2] + ' — wejście zablokowane zgodnie z Twoimi zasadami (nie graj przez makro)');
-        if(out.dir !== 0){ out.dir = 0; out.macroBlock = true; delete out.levels; }
+        warns.push('Okno makro: ' + wins[q][2] + ' — podwyższona zmienność (wejścia NIE są blokowane, uważaj na szarpnięcia)');
       }
       break;
     }
