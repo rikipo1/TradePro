@@ -50,16 +50,24 @@ export function premiumDiscount(ms, price, cfg){
    BOS = kontynuacja: cena zamyka za ostatnim swingiem ZGODNIE z trendem.
    CHOCH = zmiana charakteru: cena zamyka za swingiem PRZECIW dotychczasowemu trendowi.
    Liczymy na zamknięciu świecy i (candles[i].c). */
-export function detectBosChoch(candles, ms, i){
+export function detectBosChoch(candles, ms, i, atr){
   if(!ms) return { bos:0, choch:0, txt:null, brokeLevel:null };
-  const c = candles[i].c;
+  const cd = candles[i];
+  const c = cd.c;
   const sh = ms.lastSwingHigh.p, sl = ms.lastSwingLow.p;
+  const a = atr || (cd.h - cd.l) || 1;
+  /* WYMÓG DISPLACEMENTU: samo 1-tickowe przebicie to często sweep (pułapka),
+     nie realne złamanie struktury. Żądamy: zamknięcie WYRAŹNIE za poziomem
+     (≥0.05·ATR) ORAZ świecy z ciałem (≥0.6·ATR). Inaczej — brak BOS/CHOCH. */
+  const body = Math.abs(cd.c - cd.o);
+  const decisive = body >= a * 0.6;
+  const beyondUp = c > sh + a * 0.05;
+  const beyondDn = c < sl - a * 0.05;
   let bos = 0, choch = 0, txt = null, brokeLevel = null;
-  const brokeUp = c > sh, brokeDn = c < sl;
-  if(ms.trend >= 0 && brokeUp){ bos = 1; txt = 'BOS↑ (wybicie swing high, kontynuacja)'; brokeLevel = sh; }
-  else if(ms.trend <= 0 && brokeDn){ bos = -1; txt = 'BOS↓ (wybicie swing low, kontynuacja)'; brokeLevel = sl; }
-  else if(ms.trend > 0 && brokeDn){ choch = -1; txt = 'CHOCH↓ (złamany swing low — możliwa zmiana trendu)'; brokeLevel = sl; }
-  else if(ms.trend < 0 && brokeUp){ choch = 1; txt = 'CHOCH↑ (złamany swing high — możliwa zmiana trendu)'; brokeLevel = sh; }
+  if(ms.trend >= 0 && beyondUp && decisive){ bos = 1; txt = 'BOS↑ (wybicie z impulsem, kontynuacja)'; brokeLevel = sh; }
+  else if(ms.trend <= 0 && beyondDn && decisive){ bos = -1; txt = 'BOS↓ (wybicie z impulsem, kontynuacja)'; brokeLevel = sl; }
+  else if(ms.trend > 0 && beyondDn && decisive){ choch = -1; txt = 'CHOCH↓ (impulsowe złamanie swing low — możliwa zmiana trendu)'; brokeLevel = sl; }
+  else if(ms.trend < 0 && beyondUp && decisive){ choch = 1; txt = 'CHOCH↑ (impulsowe złamanie swing high — możliwa zmiana trendu)'; brokeLevel = sh; }
   return { bos, choch, txt, brokeLevel };
 }
 
@@ -127,15 +135,18 @@ export function detectLiquiditySweep(candles, ms, i, atr){
   const c = candles[i];
   const sh = ms.lastSwingHigh.p, sl = ms.lastSwingLow.p;
   const bufr = atr*0.08;
-  // sweep high: knot ponad swing high, ale zamknięcie z powrotem poniżej → pułapka byków → kontra SHORT
-  if(c.h > sh + bufr && c.c < sh){
-    const wick = c.h - Math.max(c.o, c.c);
-    if(wick > (c.h - c.l)*0.4) return { dir:-1, level:sh, txt:'Liquidity sweep nad swing high (pułapka) → bias SHORT' };
-  }
-  // sweep low: knot pod swing low, zamknięcie z powrotem powyżej → pułapka niedźwiedzi → kontra LONG
-  if(c.l < sl - bufr && c.c > sl){
-    const wick = Math.min(c.o, c.c) - c.l;
-    if(wick > (c.h - c.l)*0.4) return { dir:1, level:sl, txt:'Liquidity sweep pod swing low (pułapka) → bias LONG' };
+  /* sweep może być 1- lub 2-świecowy: którakolwiek z ostatnich 2 świec wybiła
+     knotem poza swing, a bieżące zamknięcie wróciło z powrotem za poziom. */
+  for(let k=i;k>=Math.max(1,i-1);k--){
+    const ck = candles[k];
+    if(ck.h > sh + bufr && c.c < sh){
+      const wick = ck.h - Math.max(ck.o, ck.c);
+      if(wick > (ck.h - ck.l)*0.35) return { dir:-1, level:sh, bars:i-k+1, txt:'Liquidity sweep nad swing high (pułapka) → bias SHORT' };
+    }
+    if(ck.l < sl - bufr && c.c > sl){
+      const wick = Math.min(ck.o, ck.c) - ck.l;
+      if(wick > (ck.h - ck.l)*0.35) return { dir:1, level:sl, bars:i-k+1, txt:'Liquidity sweep pod swing low (pułapka) → bias LONG' };
+    }
   }
   return null;
 }
@@ -192,7 +203,7 @@ export function smcAnalyze(candles, piv, i, atr, cfg){
   const ms = marketStructure(piv, i);
   const price = candles[i].c;
   const pd = premiumDiscount(ms, price, cfg);
-  const bc = detectBosChoch(candles, ms, i);
+  const bc = detectBosChoch(candles, ms, i, atr);
   const fvg = detectFVG(candles, i, atr);
   const ob = detectOrderBlock(candles, ms, i, atr);
   const sweep = detectLiquiditySweep(candles, ms, i, atr);

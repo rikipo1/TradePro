@@ -6,6 +6,13 @@ import { displacement, relativeVolume, smcAnalyze } from '../smc/index.js';
 import { sessionInfo } from '../utils/sessions.js';
 import { buildPullbackPlan } from './pullback.js';
 import { buildOpportunities } from './opportunities.js';
+import { classifyRegime } from './regime.js';
+import { extractFactors, orientedVector } from './features.js';
+import { predictProb, expectedValueR } from './model.js';
+import { liquidityModel, drawOnLiquidity } from './liquidity.js';
+import { volumeProfile } from './volumeProfile.js';
+import { positionSizing } from './sizing.js';
+import { instrProfile } from '../constants/instruments.js';
 
 /* ---------------- Faza 4: silnik sygnałów (confluence) ---------------- */
 export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, srOverride){
@@ -275,43 +282,55 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   const bullPillars = (pillarStruct > 0 ? 1 : 0) + (pillarMom > 0 ? 1 : 0) + (pillarLoc > 0 ? 1 : 0);
   const bearPillars = (pillarStruct < 0 ? 1 : 0) + (pillarMom < 0 ? 1 : 0) + (pillarLoc < 0 ? 1 : 0);
 
-  /* --- dynamiczny próg: bazowy z ustawień, wyżej w konsolidacji --- */
-  const baseTH = (srOverride && srOverride.__minScore != null) ? srOverride.__minScore : 30;
-  const TH = rangeMode ? baseTH + cfg.rangeBonus : baseTH, STRONG = cfg.strong;
-  let dir = 0;
-  if(score >= TH) dir = 1; else if(score <= -TH) dir = -1;
+  /* ============ ENGINE v2: ortogonalne czynniki → P(win) → decyzja ============
+     Zamiast progu na sumie skorelowanych punktów, kierunek bierzemy z konsensusu
+     ortogonalnych czynników, a akceptację z KALIBROWANEGO prawdopodobieństwa
+     (model logistyczny z wagami domyślnymi lub WYUCZONYMI z backtestu). */
+  const regime = classifyRegime(candles, i, ind.adx.adx, ind.atr);
+  const liq = liquidityModel(candles, i, atr);
+  const vp = hasVol ? volumeProfile(candles, i) : null;
+  const factors = extractFactors({
+    price, atr, v20, v50, v200, rsi, macdM: m, macdS: s, macdH: h, macdHp: hp,
+    stochK: k, stochD: d, stochKp: kp, stochDp: dp, vw, smc, nearSup, nearRes,
+    relVol: relVol ? { ...relVol, dir: (c.c >= c.o ? 1 : -1) } : null,
+    htfDir, liquidity: liq,
+  });
+  const weights = (srOverride && srOverride.__weights) || null;
 
-  /* wymóg zgody min. 2 z 3 filarów — inaczej konfluencja jest pozorna */
-  if(dir === 1 && bullPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/kontekst) — sygnał LONG odrzucony'); }
-  if(dir === -1 && bearPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/kontekst) — sygnał SHORT odrzucony'); }
+  let dir = factors.dirConsensus > 0.06 ? 1 : factors.dirConsensus < -0.06 ? -1 : 0;
 
-  /* blokada sygnałów wprost przeciw wyższemu interwałowi */
-  if(dir !== 0 && htfDir !== 0 && dir !== htfDir && Math.abs(score) < STRONG){
-    warns.push('Sygnał przeciw trendowi wyższego interwału — odrzucony (za słaby by grać kontrę)');
+  /* wymóg zgody min. 2 z 3 filarów (deconfounding kierunku) */
+  if(dir === 1 && bullPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — LONG odrzucony'); }
+  if(dir === -1 && bearPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — SHORT odrzucony'); }
+
+  /* P(win | dir) z modelu */
+  let prob = dir !== 0 ? predictProb(orientedVector(factors, dir), weights) : 0.5;
+
+  /* blokada kontry HTF przy niskim P(win) */
+  if(dir !== 0 && htfDir !== 0 && dir !== htfDir && prob < 0.66){
+    warns.push('Sygnał przeciw wyższemu interwałowi przy niskim P(win) — odrzucony');
+    dir = 0;
+  }
+  /* reżim konsolidacji: setup trendowy wymaga wyższego P(win) */
+  if(dir !== 0 && regime.type === 'range' && prob < 0.60){
+    warns.push('Reżim konsolidacji (ADX/efektywność niskie) — setup trendowy za słaby, odrzucony');
     dir = 0;
   }
 
-  if(dir !== 0 && rangeMode && Math.abs(score) < STRONG){
-    warns.push('Sygnał w konsolidacji (ADX < 18) — traktuj ostrożnie');
-  }
-
-  /* --- pullback-gate: gdy „czekaj na cofnięcie" jest włączone,
-     wejście w biegu (gonienie) przy słabym score jest odrzucane w SAMYM sygnale,
-     a nie tylko wyciszane w alertach — karta i alert są teraz spójne --- */
   const waitPB = !!(srOverride && srOverride.__waitPullback);
-  if(dir !== 0 && eqChase && Math.abs(score) < STRONG){
+  if(dir !== 0 && eqChase && prob < 0.66){
     if(waitPB){
-      warns.push('Cena ' + (bestDist != null ? bestDist.toFixed(1) : '?') + '×ATR od ' + bestName + ' — gonienie ruchu, sygnał wstrzymany do cofnięcia (Twoja zasada „czekaj na cofnięcie")');
+      warns.push('Cena ' + (bestDist != null ? bestDist.toFixed(1) : '?') + '×ATR od ' + bestName + ' — gonienie ruchu, wstrzymane do cofnięcia');
       dir = 0;
     } else {
-      warns.push('Cena ' + (bestDist != null ? bestDist.toFixed(1) : '?') + '×ATR od ' + bestName + ' — wejście „w biegu", rozważ poczekać na cofnięcie');
+      warns.push('Cena ' + (bestDist != null ? bestDist.toFixed(1) : '?') + '×ATR od ' + bestName + ' — wejście „w biegu", rozważ cofnięcie');
     }
   }
 
   const out = {
     i, t: c.t, price, score, dir, atr, rangeMode, htfDir,
     pillars: { bull: bullPillars, bear: bearPillars, struct: pillarStruct, mom: pillarMom, ctx: pillarCtx },
-    strong: Math.abs(score) >= STRONG,
+    strong: false,
     reasons: reasons.sort((a, b) => Math.abs(b.pts) - Math.abs(a.pts)),
     warns,
   };
@@ -320,8 +339,9 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   if(dir !== 0){
     const entry = price;
     const symForCost = (srOverride && srOverride.__sym) || null;
+    const prof = instrProfile(symForCost);
     const spr = symForCost ? spreadPx(symForCost, price) : atr*0.05;
-    const wick = atr*0.15; // bufor na stop-hunt (knot)
+    const wick = atr*prof.slWick; // bufor na stop-hunt (per instrument)
 
     /* --- STOP LOSS: za ostatnim swingiem struktury + bufor + spread --- */
     let slDist;
@@ -338,25 +358,32 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
              : (dir === -1 && nearRes) ? (nearRes.hi - price + wick + spr)
              : atr*1.1;
     }
-    slDist = Math.max(atr*0.6, Math.min(slDist, atr*2.5)); // klamra bezpieczeństwa
+    /* tylko dolna klamra (nie ściskamy SL PRZED realny swing — invalidacja
+       ma być za strukturą; zbyt daleki swing reguluje sizing, nie ucięty SL) */
+    slDist = Math.max(atr*0.5, slDist);
     const sl = dir === 1 ? entry - slDist : entry + slDist;
 
     /* --- TAKE PROFIT: najbliższy magnes płynności / strefa / swing przeciwny --- */
     const targets = [];
+    const draw = drawOnLiquidity(liq, entry, dir); // PDH/PDL/dzienne high-low = magnes płynności
     if(dir === 1){
       if(smc.eq.eqHigh && smc.eq.eqHigh > entry) targets.push({ px:smc.eq.eqHigh, why:'equal highs (płynność)' });
+      if(draw && draw.px > entry) targets.push({ px:draw.px, why:draw.label + ' (draw on liquidity)' });
       if(nearRes && nearRes.lo > entry) targets.push({ px:nearRes.lo, why:'strefa oporu' });
+      if(vp && vp.vah > entry) targets.push({ px:vp.vah, why:'VAH (profil wolumenu)' });
       if(smc.ms && smc.ms.lastSwingHigh.p > entry) targets.push({ px:smc.ms.lastSwingHigh.p, why:'poprzedni swing high' });
     } else {
       if(smc.eq.eqLow && smc.eq.eqLow < entry) targets.push({ px:smc.eq.eqLow, why:'equal lows (płynność)' });
+      if(draw && draw.px < entry) targets.push({ px:draw.px, why:draw.label + ' (draw on liquidity)' });
       if(nearSup && nearSup.hi < entry) targets.push({ px:nearSup.hi, why:'strefa wsparcia' });
+      if(vp && vp.val < entry) targets.push({ px:vp.val, why:'VAL (profil wolumenu)' });
       if(smc.ms && smc.ms.lastSwingLow.p < entry) targets.push({ px:smc.ms.lastSwingLow.p, why:'poprzedni swing low' });
     }
     targets.sort((a,b) => Math.abs(a.px-entry) - Math.abs(b.px-entry));
     const structTP = targets[0] || null;
 
     const rrTo = px => (Math.abs(px - entry) - spr) / slDist;
-    const minRR = cfg.minRR != null ? cfg.minRR : 1.5;
+    const minRR = prof.minRR || (cfg.minRR != null ? cfg.minRR : 1.5);
     let tp1, tp1why, rr1;
     if(structTP && rrTo(structTP.px) >= minRR){
       tp1 = structTP.px; tp1why = structTP.why; rr1 = +rrTo(structTP.px).toFixed(2);
@@ -389,6 +416,31 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     }
   }
 
+  /* --- EV GATE + prob + sizing (Engine v2): akceptacja z prawdopodobieństwa, nie z sumy punktów --- */
+  if(out.dir !== 0 && out.levels){
+    const costR = out.levels.slDist > 0 ? (out.levels.spreadPx / out.levels.slDist) : 0;
+    const ev = expectedValueR(prob, out.levels.rr1 || 1.5, costR);
+    const minProb = (srOverride && srOverride.__minProb != null) ? srOverride.__minProb : 0.52;
+    out.ev = +ev.toFixed(3);
+    if(prob < minProb || ev <= 0){
+      warns.push('Odrzucony przez EV/prob: P(win) ' + Math.round(prob*100) + '% · EV ' + ev.toFixed(2) + 'R (próg P ' + Math.round(minProb*100) + '%, wymagane EV>0)');
+      out.dir = 0; dir = 0; delete out.levels; out.evBlock = true;
+    } else {
+      out.sizing = positionSizing(prob, out.levels.rr1 || 1.5, { volState: regime.volState });
+    }
+  }
+  out.prob = +prob.toFixed(3);
+  out.setupScore = Math.round(prob * 100);
+  out.strong = out.dir !== 0 && prob >= 0.66;
+  out.regime = regime;
+  out.factors = {
+    trend: +factors.trend.toFixed(2), momentum: +factors.momentum.toFixed(2),
+    location: +factors.location.toFixed(2), liquidity: +factors.liquidity.toFixed(2),
+    confirmation: +factors.confirmation.toFixed(2), htf: +factors.htf.toFixed(2),
+  };
+  out.liquidityLevels = { pdh: liq.pdh, pdl: liq.pdl, todayHigh: liq.todayHigh, todayLow: liq.todayLow };
+  if(vp) out.vp = vp;
+
   /* okna makro / otwarcia sesji (czas lokalny) — INFORMACYJNIE (bez blokady wejść) */
   const dt = new Date();
   const hm = dt.getHours()*60 + dt.getMinutes();
@@ -409,14 +461,18 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     }
   }
 
-  /* --- FILTR SESJI (tylko live) — cienki rynek = więcej fałszywych ruchów --- */
-  const sess = sessionInfo(dt);
+  /* --- FILTR SESJI — cienki rynek = więcej fałszywych ruchów.
+     Teraz SPÓJNIE live i backtest (czas ze świecy) + per instrument (crypto 24/7). --- */
+  const symG = (srOverride && srOverride.__sym) || null;
+  const profG = instrProfile(symG);
+  const sessDt = isLive ? new Date() : new Date(c.t*1000);
+  const sess = sessionInfo(sessDt);
   out.session = { label: sess.label, quality: sess.quality };
-  if(isLive && out.dir !== 0){
+  if(profG.sessionSensitive && out.dir !== 0){
     if(sess.weekend){
       warns.push('Rynek zamknięty (' + sess.label + ') — wejście zablokowane');
       out.dir = 0; out.sessionBlock = true; delete out.levels;
-    } else if(sess.quality < 0 && Math.abs(score) < STRONG){
+    } else if(sess.quality < 0 && prob < 0.66){
       warns.push('Słabe okno płynności: ' + sess.label + ' — sygnał wstrzymany (graj w London/NY albo czekaj na mocny setup)');
       out.dir = 0; out.sessionBlock = true; delete out.levels;
     } else if(sess.quality < 0){
@@ -484,7 +540,7 @@ export function indicatorsFor(candles, tfId){
   for(let i=0;i<EMA_DEFS.length;i++){ emaData[EMA_DEFS[i].n] = emaSeries(closes, EMA_DEFS[i].n); }
   return { ind, emaData, hasVol };
 }
-export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, smcCfg){
+export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, smcCfg, weights){
   const data = await getChart(symbol, tf, source);
   if(!data || !data.candles || data.candles.length < 30) return { data, signal:null };
   const pack = indicatorsFor(data.candles, tf.id);
@@ -500,6 +556,7 @@ export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, 
   srWithHtf.__waitPullback = !!waitPullback;
   srWithHtf.__sym = symbol;
   srWithHtf.__smc = smcCfg || null;
+  srWithHtf.__weights = weights || null;
   const signal = computeSignal(data.candles, pack.ind, pack.emaData, patterns, pack.hasVol, null, srWithHtf);
   return { data, signal, demo: !!data.demo };
 }

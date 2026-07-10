@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { aiPrompt, buildAiContext, callClaude, callGemini, tolerantJson } from '../ai/index.js';
-import { backtestEngine } from '../backtest/engine.js';
+import { backtestEngine, walkForward } from '../backtest/engine.js';
+import { Store } from '../core/store.js';
 import { ChartCanvas } from '../components/ChartCanvas.jsx';
 import { EquityLine } from '../components/EquityLine.jsx';
 import { IC, Ic } from '../components/icons.jsx';
@@ -29,6 +30,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const [showBt, setShowBt] = useState(false);
   const [ticket, setTicket] = useState(null);
   const [bt, setBt] = useState({ busy:false, res:null });
+  const [wv, setWv] = useState(0); // wersja wag modelu (bump po treningu → recompute)
   const prevDirRef = useRef(0);
   const lastAlertRef = useRef({ dir:0, t:0, bar:null });
   const pbAlertRef = useRef({ key:null, t:0 });
@@ -258,8 +260,10 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     srWithHtf.__waitPullback = !!prefs.waitPullback;
     srWithHtf.__sym = item.sym;
     srWithHtf.__smc = prefs.smc || null;
+    srWithHtf.__weights = Store.get('rt_model_weights', null);
+    if(prefs.minProb != null) srWithHtf.__minProb = prefs.minProb;
     return computeSignal(candlesSafe, ind, emaData, patterns, hasVol, null, srWithHtf);
-  }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.waitPullback, prefs.smc, item.sym]);
+  }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.minProb, prefs.waitPullback, prefs.smc, item.sym, wv]);
   /* najlepsza „okazja" poza samym aktywnym sygnałem (do paska i alertu) */
   const topOpp = useMemo(() => {
     const ops = signal && signal.opportunities;
@@ -555,11 +559,11 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
               background: signal.dir > 0 ? '#2fd6ae' : signal.dir < 0 ? '#ff6b5e' : '#8fb0ac'}} />
           </span>
           <span className="sig-meta mono" style={{color:'var(--dim)'}}>
-            {'confluence ' + (signal.score > 0 ? '+' : '') + signal.score}
+            {signal.setupScore != null ? 'P(win) ' + signal.setupScore + '%' + (signal.ev != null ? ' · EV ' + (signal.ev>0?'+':'') + signal.ev + 'R' : '') : 'confluence ' + (signal.score > 0 ? '+' : '') + signal.score}
             <br/>
             {signal.dir !== 0 && signal.levels
               ? 'SL ' + fmtPrice(signal.levels.sl) + ' · TP1 ' + fmtPrice(signal.levels.tp1)
-              : 'próg sygnału: ±' + (prefs.minScore != null ? prefs.minScore : 30)}
+              : 'brak przewagi (EV/prob poniżej progu)'}
           </span>
           {signal.dir !== 0 && signal.entryQuality && (
             <span className="mono" style={{
@@ -715,6 +719,15 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
               świeca z {fmtFull(signal.t, tf.id)} · ATR {fmtPrice(signal.atr)}
             </div>
 
+            {signal.setupScore != null && (
+              <div style={{display:'flex', gap:6, marginBottom:8, flexWrap:'wrap'}}>
+                <span className="mono" style={{fontSize:11, fontWeight:800, padding:'3px 8px', borderRadius:7, background: signal.setupScore>=66?'rgba(47,214,174,.15)':signal.setupScore>=52?'rgba(255,201,77,.15)':'rgba(143,176,172,.1)', color: signal.setupScore>=66?'var(--up)':signal.setupScore>=52?'var(--ema9)':'var(--dim)'}}>P(win) {signal.setupScore}%</span>
+                {signal.ev != null && <span className="mono" style={{fontSize:11, fontWeight:700, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border2)', color: signal.ev>0?'var(--up)':'var(--down)'}}>EV {signal.ev>0?'+':''}{signal.ev}R</span>}
+                {signal.regime && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color:'var(--dim)'}}>{signal.regime.type} · ADX {signal.regime.adx}</span>}
+                {signal.sizing && signal.dir !== 0 && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color:'var(--dim)'}}>ryzyko {signal.sizing.riskPct}%</span>}
+              </div>
+            )}
+
             <div style={{overflowY:'auto', flex:1}}>
               {signal.dir !== 0 && signal.levels && (
                 <div style={{
@@ -751,8 +764,10 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   borderRadius:12, padding:'10px 12px', marginBottom:10,
                   fontSize:13, color:'var(--dim)', lineHeight:1.6,
                 }}>
-                  Confluence {signal.score > 0 ? '+' : ''}{signal.score} nie przekracza progu ±{prefs.minScore != null ? prefs.minScore : 30}.
-                  Zgodnie z Twoimi zasadami: brak przewagi = brak wejścia. Poczekaj na wyraźniejszy układ.
+                  Brak wejścia: P(win) {signal.setupScore != null ? signal.setupScore + '%' : '—'}
+                  {signal.ev != null ? ' · EV ' + (signal.ev > 0 ? '+' : '') + signal.ev + 'R' : ''}
+                  {signal.evBlock ? ' — poniżej progu oczekiwanej wartości' : ''}.
+                  Model nie widzi tu dodatniej przewagi (EV) — zgodnie z zasadą: brak edge = brak transakcji.
                 </div>
               )}
 
@@ -1009,12 +1024,40 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   }
                   setBt({ busy:true, res:null });
                   setTimeout(() => {
-                    const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc);
+                    const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, { weights: Store.get('rt_model_weights', null) });
                     setBt({ busy:false, res:r });
                   }, 40);
                 }}>
                 {bt.busy ? 'Liczę świeca po świecy…' : 'Uruchom backtest na załadowanej historii'}
               </button>
+              <button className="chip mono"
+                style={{width:'100%', justifyContent:'center', padding:'10px', fontSize:13, marginTop:8, color:'var(--cyan)', borderColor:'rgba(79,216,255,.4)', opacity: bt.busy ? 0.6 : 1}}
+                onClick={() => {
+                  if(bt.busy || !ind || candlesSafe.length < 250){ if(!bt.busy) Bus.show('Do treningu wag trzeba ≥250 świec (zmień interwał na większy zakres)'); return; }
+                  setBt({ busy:true, res:null });
+                  setTimeout(() => {
+                    const wf = walkForward(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc);
+                    if(wf && wf.ok){
+                      Store.set('rt_model_weights', wf.weights);
+                      setWv(v => v + 1);
+                      Bus.show('🧠 Wagi wyuczone — OOS: ' + (wf.outSample.n||0) + ' transakcji, PF ' + (wf.outSample.pf||0) + ', avg ' + (wf.outSample.avgR||0) + 'R');
+                    } else {
+                      Bus.show('Trening nieudany: ' + (wf ? wf.reason : 'brak danych'));
+                    }
+                    const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, { weights: Store.get('rt_model_weights', null) });
+                    r.wf = wf;
+                    setBt({ busy:false, res:r });
+                  }, 40);
+                }}>
+                🧠 Trenuj wagi z backtestu (walk-forward)
+              </button>
+              {Store.get('rt_model_weights', null) && (
+                <div style={{marginTop:6, fontSize:10.5, color:'var(--dim2)'}} className="mono">
+                  Model używa WYUCZONYCH wag.
+                  <button className="mono" style={{marginLeft:8, color:'var(--down)', background:'none', border:'none', textDecoration:'underline'}}
+                    onClick={() => { Store.set('rt_model_weights', null); setWv(v=>v+1); Bus.show('Przywrócono wagi domyślne'); }}>reset</button>
+                </div>
+              )}
               {bt.busy && <div style={{display:'flex', justifyContent:'center', padding:16}}><div className="loader" /></div>}
               {bt.res && !bt.busy && bt.res.stats && (
                 <div style={{marginTop:10}}>
@@ -1052,6 +1095,15 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                         </div>
                       ))}
                     </React.Fragment>
+                  )}
+                  {bt.res.wf && bt.res.wf.ok && (
+                    <div style={{marginTop:12, background:'var(--bg)', border:'1px solid rgba(79,216,255,.3)', borderRadius:12, padding:'10px 12px'}}>
+                      <div className="section-label" style={{padding:'0 0 6px', color:'var(--cyan)'}}>Walk-forward (uczenie wag)</div>
+                      <div className="kv"><b>In-sample (trening 60%)</b><span className="mono">{bt.res.wf.inSample.n} tr · PF {bt.res.wf.inSample.pf} · {bt.res.wf.inSample.avgR}R</span></div>
+                      <div className="kv"><b>Out-of-sample (test 40%)</b><span className="mono" style={{color: (bt.res.wf.outSample.avgR||0) > 0 ? 'var(--up)' : 'var(--down)', fontWeight:700}}>{bt.res.wf.outSample.n||0} tr · PF {bt.res.wf.outSample.pf||0} · {bt.res.wf.outSample.avgR||0}R</span></div>
+                      <div className="kv"><b>Baseline (wagi domyślne)</b><span className="mono">{bt.res.wf.baseline ? bt.res.wf.baseline.n : '—'} tr · {bt.res.wf.baseline ? bt.res.wf.baseline.avgR : '—'}R</span></div>
+                      <div style={{fontSize:10.5, color:'var(--dim2)', marginTop:5, lineHeight:1.55}}>OOS to jedyny uczciwy dowód przewagi. Jeśli OOS PF ≤ 1 lub avgR ≤ 0 — model NIE ma edge na tym instrumencie; nie ufaj wyuczonym wagom.</div>
+                    </div>
                   )}
                   <div style={{marginTop:12, fontSize:11, color:'var(--dim2)', lineHeight:1.65}}>
                     Metodologia: wejście po close świecy sygnału · wyjście w całości na TP1 (+1.5R) lub SL (−1R) ·

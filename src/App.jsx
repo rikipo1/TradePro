@@ -132,7 +132,7 @@ export function App(){
           const it = wl[s];
           if(!it || it.sym === activeSym) continue;
           let res = null;
-          try{ res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc); }catch(e){ continue; }
+          try{ res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc, Store.get('rt_model_weights', null)); }catch(e){ continue; }
           const sig = res && res.signal;
           if(!sig) continue;
 
