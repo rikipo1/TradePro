@@ -228,34 +228,11 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   }
 
   score = Math.max(-100, Math.min(100, Math.round(score)));
-
-  /* --- JAKOŚĆ WEJŚCIA liczona PRZED decyzją o kierunku ---
-     dystans ceny do najbliższej kotwicy (EMA20 / VWAP / świeżo złamana strefa).
-     Blisko kotwicy = świeże wejście przy strefie (dobre, ciasny SL);
-     daleko = „gonienie ruchu" (złe RR, wejście w biegu).
-     Kierunek prawdopodobny bierzemy ze znaku score, by dobrać właściwą strefę. */
-  const probDir = score > 0 ? 1 : score < 0 ? -1 : 0;
-  const anchors = [];
-  if(v20 != null) anchors.push({ name:'EMA20', px:v20 });
-  if(vw != null)  anchors.push({ name:'VWAP',  px:vw });
-  if(probDir === 1 && nearSup) anchors.push({ name:'wsparcie', px:nearSup.hi });
-  if(probDir === -1 && nearRes) anchors.push({ name:'opór', px:nearRes.lo });
-  let bestDist = null, bestName = null;
-  for(let q=0;q<anchors.length;q++){
-    const d = Math.abs(price - anchors[q].px) / atr;
-    if(bestDist == null || d < bestDist){ bestDist = d; bestName = anchors[q].name; }
-  }
-  let eqGrade = null, eqGood = false, eqChase = false, eqPts = 0;
-  if(bestDist != null){
-    if(bestDist <= 0.6){ eqGrade = 'przy strefie'; eqGood = true; eqPts = 6; }
-    else if(bestDist <= 1.3){ eqGrade = 'akceptowalne'; eqPts = 0; }
-    else { eqGrade = 'gonienie ruchu'; eqChase = true; eqPts = -8; }
-    /* korekta score PRZED progiem — dobre wejście lekko premiowane,
-       gonienie karane, więc kara realnie wpływa na to czy sygnał w ogóle powstanie */
-    if(probDir !== 0 && eqPts !== 0){
-      score = Math.max(-100, Math.min(100, score + probDir*eqPts));
-    }
-  }
+  /* [W2] `score` (suma punktów) i `reasons`/`warns` pozostają WYŁĄCZNIE jako
+     diagnostyka do UI/AI. Żadna bramka decyzyjna (dir / akceptacja / sizing) nie
+     zależy już od `score`. Kierunek bierzemy z factors.dirConsensus + filarów,
+     akceptację z prob/EV. Jakość wejścia (eqChase) liczymy PO ustaleniu dir
+     i wpływa na decyzję TYLKO RAZ (gate prob<0.66 / waitPullback niżej). */
 
   /* --- konfluencja z 3 ORTOGONALNYCH filarów ---
      Poprzednio wszystkie 3 czytały „cena vs EMA/VWAP" → jeden dowód liczony 3×.
@@ -308,6 +285,27 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   /* wymóg zgody min. 2 z 3 filarów (deconfounding kierunku) */
   if(dir === 1 && bullPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — LONG odrzucony'); }
   if(dir === -1 && bearPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — SHORT odrzucony'); }
+
+  /* --- [W2] JAKOŚĆ WEJŚCIA — liczona z REALNEGO kierunku (dir z factors/filarów),
+     NIE ze znaku `score`. Dystans do najbliższej kotwicy (EMA20/VWAP/strefa):
+     blisko = świeże wejście (ciasny SL); daleko = „gonienie ruchu". Nie modyfikuje
+     już `score` — wpływa na decyzję wyłącznie przez gate eqChase niżej (raz). */
+  const anchors = [];
+  if(v20 != null) anchors.push({ name:'EMA20', px:v20 });
+  if(vw != null)  anchors.push({ name:'VWAP',  px:vw });
+  if(dir === 1 && nearSup) anchors.push({ name:'wsparcie', px:nearSup.hi });
+  if(dir === -1 && nearRes) anchors.push({ name:'opór', px:nearRes.lo });
+  let bestDist = null, bestName = null;
+  for(let q=0;q<anchors.length;q++){
+    const dst = Math.abs(price - anchors[q].px) / atr;
+    if(bestDist == null || dst < bestDist){ bestDist = dst; bestName = anchors[q].name; }
+  }
+  let eqGrade = null, eqGood = false, eqChase = false;
+  if(bestDist != null){
+    if(bestDist <= 0.6){ eqGrade = 'przy strefie'; eqGood = true; }
+    else if(bestDist <= 1.3){ eqGrade = 'akceptowalne'; }
+    else { eqGrade = 'gonienie ruchu'; eqChase = true; }
+  }
 
   /* P(win | dir) z modelu + kalibracja isotonic — [C3] kalibracja tylko reliable */
   const calibMap = (reliable && srOverride && srOverride.__calib) || null;
