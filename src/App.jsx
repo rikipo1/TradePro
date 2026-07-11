@@ -14,6 +14,7 @@ import { WatchlistScreen } from './screens/WatchlistScreen.jsx';
 import { analyzeSymbol } from './signals/engine.js';
 import { riskStatus } from './signals/riskEngine.js';
 import { correlationMatrix, duplicatesExposure } from './signals/correlation.js';
+import { fmtPips } from './constants/instruments.js';
 import { fmtPrice } from './utils/format.js';
 import { notifyUser } from './utils/notify.js';
 
@@ -225,7 +226,8 @@ export function App(){
           const pTag = sig.setupScore != null ? (sig.probCalibrated ? 'P ' + sig.setupScore + '%' : 'score ' + sig.setupScore) : (sig.score > 0 ? '+' : '') + sig.score;
           const msg = (strong ? '★ ' : '') + it.sym + ' ' + tfObj.label + ': ' + dtxt
             + ' (' + pTag + htfTag + eqTag + ')'
-            + (sig.levels ? ' · SL ' + fmtPrice(sig.levels.sl) + ' · TP1 ' + fmtPrice(sig.levels.tp1) : '')
+            + (sig.levels ? ' · SL ' + fmtPrice(sig.levels.sl) + ' (' + fmtPips(it.sym, sig.levels.sl - sig.levels.entry) + ')'
+                + ' · TP1 ' + fmtPrice(sig.levels.tp1) + ' (' + fmtPips(it.sym, sig.levels.tp1 - sig.levels.entry) + ')' : '')
             + dupTag;
           notifyUser('Rikipo Trader — ' + (strong ? 'MOCNY ' : '') + dtxt + ' ' + it.sym, msg);
           Bus.show((strong ? '🔥 ' : '⚡ ') + '[skaner] ' + msg);

@@ -16,6 +16,7 @@ import { detectPatterns } from '../patterns/index.js';
 import { computeSignal } from '../signals/engine.js';
 import { displacement } from '../smc/index.js';
 import { fmtClock, fmtFull, fmtPct, fmtPrice, fmtVol } from '../utils/format.js';
+import { fmtPips, toPips } from '../constants/instruments.js';
 import { notifyUser } from '../utils/notify.js';
 
 export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJournal, journal, resolveTick }){
@@ -514,7 +515,8 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     const eqTag = eq ? (eq.good ? ' ✓przy strefie' : eq.chase ? ' ⚠gonienie' : '') : '';
     const msg = (strong ? '★ ' : '') + item.sym + ' ' + tf.label + ': ' + dtxt
       + ' (' + (signal.score > 0 ? '+' : '') + signal.score + htfTag + eqTag + ')'
-      + (signal.levels ? ' · SL ' + fmtPrice(signal.levels.sl) + ' · TP1 ' + fmtPrice(signal.levels.tp1) : '');
+      + (signal.levels ? ' · SL ' + fmtPrice(signal.levels.sl) + ' (' + fmtPips(item.sym, signal.levels.sl - signal.levels.entry) + ')'
+          + ' · TP1 ' + fmtPrice(signal.levels.tp1) + ' (' + fmtPips(item.sym, signal.levels.tp1 - signal.levels.entry) + ')' : '');
     if(prefs.alert){
       notifyUser('Rikipo Trader — ' + (strong ? 'MOCNY sygnał ' : 'sygnał ') + dtxt, msg);
       Bus.show((strong ? '🔥 ' : '⚡ ') + msg);
@@ -656,7 +658,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
             {signal.setupScore != null ? (signal.probCalibrated ? 'P(win) ' + signal.setupScore + '%' : 'score (niekalibr.) ' + signal.setupScore) + (signal.ev != null ? ' · EV ' + (signal.ev>0?'+':'') + signal.ev + 'R' : '') : 'confluence ' + (signal.score > 0 ? '+' : '') + signal.score}
             <br/>
             {signal.dir !== 0 && signal.levels
-              ? 'SL ' + fmtPrice(signal.levels.sl) + ' · TP1 ' + fmtPrice(signal.levels.tp1)
+              ? 'SL ' + fmtPrice(signal.levels.sl) + ' (' + fmtPips(item.sym, signal.levels.sl - signal.levels.entry) + ') · TP1 ' + fmtPrice(signal.levels.tp1) + ' (' + fmtPips(item.sym, signal.levels.tp1 - signal.levels.entry) + ')'
               : 'brak przewagi (EV/prob poniżej progu)'}
           </span>
           {signal.dir !== 0 && signal.entryQuality && (
@@ -861,7 +863,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       <span className="mono" style={{color:col, fontWeight:700}}>
                         {fmtPrice(p)}
                         <span style={{color:'var(--dim2)', fontWeight:500}}>
-                          {'  (' + (p >= signal.levels.entry ? '+' : '−') + fmtPrice(Math.abs(p - signal.levels.entry)) + ')'}
+                          {lbl === 'Wejście' ? '' : '  (' + (p >= signal.levels.entry ? '+' : '−') + fmtPips(item.sym, p - signal.levels.entry) + ')'}
                         </span>
                       </span>
                     </div>
@@ -869,7 +871,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   <div className="kv">
                     <b>Ryzyko (do SL)</b>
                     <span className="mono" style={{color:'var(--dim)'}}>
-                      {fmtPrice(signal.levels.slDist)} pkt · {(signal.levels.slDist/signal.levels.entry*100).toFixed(2)}% · {(signal.levels.slDist/signal.atr).toFixed(1)}×ATR
+                      {fmtPips(item.sym, signal.levels.slDist)} · {(signal.levels.slDist/signal.levels.entry*100).toFixed(2)}% · {(signal.levels.slDist/signal.atr).toFixed(1)}×ATR
                     </span>
                   </div>
                 </div>

@@ -6,6 +6,7 @@ import { CAP_MAP, capEnabled, capitalTick } from '../data/capital.js';
 import { fetchQuotes } from '../data/feed.js';
 import { paperFloating } from '../data/paper.js';
 import { riskStatus } from '../signals/riskEngine.js';
+import { fmtPips, toPips } from '../constants/instruments.js';
 import { fmtPrice, pad2 } from '../utils/format.js';
 
 export function fmtDT(ts){
@@ -147,6 +148,11 @@ export function JournalScreen({ journal, setJournal, prefs }){
         {journal.map(e => {
           const rd = resultOf(e.result);
           const isExp = expanded === e.id;
+          /* pipsy P/L: pływające (otwarta) lub zrealizowane (zamknięta) */
+          const plRef = e.result === 'open' ? q[e.sym] : e.exit;
+          const plDist = (plRef != null && e.entry != null) ? (plRef - e.entry) * (e.dir || 1) : null;
+          const plPipsN = plDist != null ? toPips(e.sym, plDist) : null;
+          const plPips = plPipsN != null ? ((plDist >= 0 ? '+' : '−') + plPipsN + 'p') : null;
           return (
             <React.Fragment key={e.id}>
             <div className="wl-row" style={isExp ? {borderBottomColor:'transparent'} : null}
@@ -166,7 +172,8 @@ export function JournalScreen({ journal, setJournal, prefs }){
                 </div>
                 <div className="wl-sym mono" style={{whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
                   {fmtDT(e.ts)}
-                  {e.entry != null ? ' · E ' + fmtPrice(e.entry) + ' SL ' + fmtPrice(e.sl) : ''}
+                  {e.entry != null ? ' · E ' + fmtPrice(e.entry) + ' · SL ' + fmtPrice(e.sl) + ' (' + fmtPips(e.sym, e.sl - e.entry) + ')' : ''}
+                  {e.entry != null && e.tp1 != null ? ' · TP1 ' + fmtPips(e.sym, e.tp1 - e.entry) : ''}
                   {e.note ? ' · ' + e.note : ''}
                 </div>
               </div>
@@ -178,11 +185,12 @@ export function JournalScreen({ journal, setJournal, prefs }){
                   ? (() => {
                       const fl = paperFloating(e, q[e.sym]);
                       const tag = e.stage === 'runner' ? 'RUN ' : e.stage === 'be' ? 'BE→ ' : 'LIVE ';
-                      return fl == null ? (e.stage === 'runner' ? 'RUNNER' : 'OTWARTA') : tag + (fl > 0 ? '+' : '') + fl + 'R';
+                      const base = fl == null ? (e.stage === 'runner' ? 'RUNNER' : 'OTWARTA') : tag + (fl > 0 ? '+' : '') + fl + 'R';
+                      return base + (plPips ? ' · ' + plPips : '');
                     })()
                   : e.result === 'pending' ? '⏳ LIMIT'
                   : e.result === 'cancelled' ? 'ANULOWANE'
-                  : (rd ? rd[1] : (e.result === 'manual' ? 'RYNEK' : String(e.result).toUpperCase())) + ' ' + ((e.r || 0) > 0 ? '+' : '') + (e.r || 0) + 'R'}
+                  : (rd ? rd[1] : (e.result === 'manual' ? 'RYNEK' : String(e.result).toUpperCase())) + ' ' + ((e.r || 0) > 0 ? '+' : '') + (e.r || 0) + 'R' + (plPips ? ' · ' + plPips : '')}
               </span>
             </div>
             {isExp && (

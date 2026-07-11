@@ -36,3 +36,29 @@ export function instrProfile(sym){
   const cls = instrClass(sym);
   return { cls, ...CLASS_DEFAULTS[cls] };
 }
+
+/* --- PIPS (konwencja zbliżona do XTB CFD) ---
+   Rozmiar 1 pipsa w jednostkach ceny, per klasa instrumentu:
+     • FX majors        0.0001 ; pary z JPY 0.01
+     • indeksy (DE40…)  1.0  (1 pip = 1 punkt)
+     • złoto            0.1
+     • krypto           1.0
+   toPips() zamienia dystans ceny (np. |SL − entry|) na liczbę pipsów.        */
+export function pipSize(sym){
+  const cls = instrClass(sym);
+  if(cls === 'fx') return /JPY/i.test(sym || '') ? 0.01 : 0.0001;
+  if(cls === 'gold') return 0.1;
+  if(cls === 'crypto') return 1;
+  return 1; // index
+}
+export function toPips(sym, priceDist){
+  if(priceDist == null || !isFinite(priceDist)) return null;
+  const ps = pipSize(sym) || 1;
+  const v = Math.abs(priceDist) / ps;
+  return v >= 100 ? Math.round(v) : +v.toFixed(1);
+}
+/* skrót do UI: „123 pip" (albo „—") */
+export function fmtPips(sym, priceDist){
+  const p = toPips(sym, priceDist);
+  return p == null ? '—' : p + ' pip';
+}
