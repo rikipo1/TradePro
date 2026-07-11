@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { aiPrompt, buildAiContext, callClaude, callGemini, tolerantJson } from '../ai/index.js';
 import { backtestEngine, walkForward } from '../backtest/engine.js';
 import { riskStatus } from '../signals/riskEngine.js';
-import { Store } from '../core/store.js';
+import { Store, modelKey } from '../core/store.js';
 import { ChartCanvas } from '../components/ChartCanvas.jsx';
 import { EquityLine } from '../components/EquityLine.jsx';
 import { IC, Ic } from '../components/icons.jsx';
@@ -266,9 +266,14 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     srWithHtf.__waitPullback = !!prefs.waitPullback;
     srWithHtf.__sym = item.sym;
     srWithHtf.__smc = prefs.smc || null;
-    srWithHtf.__weights = Store.get('rt_model_weights', null);
-    srWithHtf.__calib = Store.get('rt_model_calib', null);
-    srWithHtf.__knn = Store.get('rt_knn_history', null);
+    /* [C1] model PER instrument×TF — fallback: brak modelu → DEFAULT_WEIGHTS.
+       NIGDY nie używamy modelu innej pary. [C3] engine sam zdecyduje, czy
+       zastosować wyuczone wagi (tylko gdy reliable), inaczej DEFAULT_WEIGHTS. */
+    const mMeta = Store.get(modelKey('meta', item.sym, tf.id), null);
+    srWithHtf.__weights = Store.get(modelKey('weights', item.sym, tf.id), null);
+    srWithHtf.__calib = Store.get(modelKey('calib', item.sym, tf.id), null);
+    srWithHtf.__knn = Store.get(modelKey('knn', item.sym, tf.id), null);
+    srWithHtf.__reliable = !!(mMeta && mMeta.reliable);
     if(prefs.minProb != null) srWithHtf.__minProb = prefs.minProb;
     return computeSignal(candlesSafe, ind, emaData, patterns, hasVol, null, srWithHtf);
   }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.minProb, prefs.waitPullback, prefs.smc, item.sym, wv]);
@@ -597,7 +602,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
               background: signal.dir > 0 ? '#2fd6ae' : signal.dir < 0 ? '#ff6b5e' : '#8fb0ac'}} />
           </span>
           <span className="sig-meta mono" style={{color:'var(--dim)'}}>
-            {signal.setupScore != null ? 'P(win) ' + signal.setupScore + '%' + (signal.ev != null ? ' · EV ' + (signal.ev>0?'+':'') + signal.ev + 'R' : '') : 'confluence ' + (signal.score > 0 ? '+' : '') + signal.score}
+            {signal.setupScore != null ? (signal.probCalibrated ? 'P(win) ' + signal.setupScore + '%' : 'score (niekalibr.) ' + signal.setupScore) + (signal.ev != null ? ' · EV ' + (signal.ev>0?'+':'') + signal.ev + 'R' : '') : 'confluence ' + (signal.score > 0 ? '+' : '') + signal.score}
             <br/>
             {signal.dir !== 0 && signal.levels
               ? 'SL ' + fmtPrice(signal.levels.sl) + ' · TP1 ' + fmtPrice(signal.levels.tp1)
@@ -766,7 +771,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
 
             {signal.setupScore != null && (
               <div style={{display:'flex', gap:6, marginBottom:8, flexWrap:'wrap'}}>
-                <span className="mono" style={{fontSize:11, fontWeight:800, padding:'3px 8px', borderRadius:7, background: signal.setupScore>=66?'rgba(47,214,174,.15)':signal.setupScore>=52?'rgba(255,201,77,.15)':'rgba(143,176,172,.1)', color: signal.setupScore>=66?'var(--up)':signal.setupScore>=52?'var(--ema9)':'var(--dim)'}}>P(win) {signal.setupScore}%</span>
+                <span className="mono" style={{fontSize:11, fontWeight:800, padding:'3px 8px', borderRadius:7, background: signal.setupScore>=66?'rgba(47,214,174,.15)':signal.setupScore>=52?'rgba(255,201,77,.15)':'rgba(143,176,172,.1)', color: signal.setupScore>=66?'var(--up)':signal.setupScore>=52?'var(--ema9)':'var(--dim)'}}>{signal.probCalibrated ? 'P(win) ' + signal.setupScore + '%' : 'score ' + signal.setupScore + ' (niekalibr.)'}</span>
                 {signal.ev != null && <span className="mono" style={{fontSize:11, fontWeight:700, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border2)', color: signal.ev>0?'var(--up)':'var(--down)'}}>EV {signal.ev>0?'+':''}{signal.ev}R</span>}
                 {signal.regime && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color:'var(--dim)'}}>{signal.regime.type} · ADX {signal.regime.adx}</span>}
                 {signal.sizing && signal.dir !== 0 && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color:'var(--dim)'}}>ryzyko {signal.sizing.riskPct}%</span>}
@@ -810,7 +815,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   borderRadius:12, padding:'10px 12px', marginBottom:10,
                   fontSize:13, color:'var(--dim)', lineHeight:1.6,
                 }}>
-                  Brak wejścia: P(win) {signal.setupScore != null ? signal.setupScore + '%' : '—'}
+                  Brak wejścia: {signal.probCalibrated ? 'P(win) ' : 'score (niekalibr.) '}{signal.setupScore != null ? signal.setupScore + (signal.probCalibrated ? '%' : '') : '—'}
                   {signal.ev != null ? ' · EV ' + (signal.ev > 0 ? '+' : '') + signal.ev + 'R' : ''}
                   {signal.evBlock ? ' — poniżej progu oczekiwanej wartości' : ''}.
                   Model nie widzi tu dodatniej przewagi (EV) — zgodnie z zasadą: brak edge = brak transakcji.
@@ -1070,8 +1075,12 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   }
                   setBt({ busy:true, res:null });
                   setTimeout(() => {
+                    const mMeta = Store.get(modelKey('meta', item.sym, tf.id), null);
+                    const rel = !!(mMeta && mMeta.reliable);
                     const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc,
-                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
+                      { weights: rel ? Store.get(modelKey('weights', item.sym, tf.id), null) : null,
+                        calib: rel ? Store.get(modelKey('calib', item.sym, tf.id), null) : null,
+                        knn: rel ? Store.get(modelKey('knn', item.sym, tf.id), null) : null, tfId: tf.id });
                     setBt({ busy:false, res:r });
                   }, 40);
                 }}>
@@ -1104,13 +1113,14 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 }}>
                 🧠 Trenuj wagi z backtestu (walk-forward)
               </button>
-              {Store.get('rt_model_weights', null) && (() => {
-                const meta = Store.get('rt_model_meta', null);
+              {Store.get(modelKey('weights', item.sym, tf.id), null) && (() => {
+                const meta = Store.get(modelKey('meta', item.sym, tf.id), null);
+                /* [C1] pokazujemy, dla której pary/TF jest załadowany model */
                 return (
                   <div style={{marginTop:6, fontSize:10.5, color: meta && !meta.reliable ? 'var(--ema9)' : 'var(--dim2)'}} className="mono">
-                    Model używa WYUCZONYCH wag{meta ? ' (n=' + meta.n + (meta.reliable ? ', wiarygodne' : ', ⚠ mała próba — traktuj jako eksperyment') + ')' : ''}.
+                    Model dla <b>{item.sym} · {tf.label}</b>{meta ? ' (n=' + meta.n + (meta.reliable ? ', wiarygodne — wagi/kalibracja/kNN AKTYWNE' : ', ⚠ NIEwiarygodne — używane DEFAULT_WEIGHTS') + ')' : ''}.
                     <button className="mono" style={{marginLeft:8, color:'var(--down)', background:'none', border:'none', textDecoration:'underline'}}
-                      onClick={() => { Store.set('rt_model_weights', null); Store.set('rt_model_calib', null); Store.set('rt_model_meta', null); setWv(v=>v+1); Bus.show('Przywrócono wagi domyślne'); }}>reset</button>
+                      onClick={() => { Store.del(modelKey('weights', item.sym, tf.id)); Store.del(modelKey('calib', item.sym, tf.id)); Store.del(modelKey('knn', item.sym, tf.id)); Store.del(modelKey('meta', item.sym, tf.id)); setWv(v=>v+1); Bus.show('Przywrócono wagi domyślne dla ' + item.sym + ' · ' + tf.label); }}>reset</button>
                   </div>
                 );
               })()}

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { IC, Ic } from './components/icons.jsx';
 import { DEFAULT_PREFS, DEFAULT_SMC, DEFAULT_WL } from './constants/defaults.js';
 import { Bus } from './core/bus.js';
-import { Store } from './core/store.js';
+import { Store, modelKey, migrateModelV2 } from './core/store.js';
 import { CAP_MAP, CapCfg, CapSess, capEnabled, capitalTick, setCapWarned } from './data/capital.js';
 import { fetchQuotes } from './data/feed.js';
 import { resolvePaperList } from './data/paper.js';
@@ -71,6 +71,8 @@ export function App(){
       setToast(m);
       setTimeout(() => setToast(null), 2800);
     };
+    /* [C1] migracja v2: usuń stare GLOBALNE klucze modelu (jednorazowo) */
+    migrateModelV2((m) => Bus.show('⚠ ' + m));
     return () => { Bus.fn = null; };
   }, []);
 
@@ -137,7 +139,13 @@ export function App(){
           const it = wl[s];
           if(!it || it.sym === activeSym) continue;
           let res = null;
-          try{ res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc, Store.get('rt_model_weights', null), Store.get('rt_model_calib', null)); }catch(e){ continue; }
+          /* [C1][C3] model PER instrument×TF — i tylko gdy wiarygodny (reliable),
+             inaczej DEFAULT_WEIGHTS (weights=calib=null). NIGDY model innej pary. */
+          const mMeta = Store.get(modelKey('meta', it.sym, tfObj.id), null);
+          const rel = !!(mMeta && mMeta.reliable);
+          const mW = rel ? Store.get(modelKey('weights', it.sym, tfObj.id), null) : null;
+          const mC = rel ? Store.get(modelKey('calib', it.sym, tfObj.id), null) : null;
+          try{ res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc, mW, mC); }catch(e){ continue; }
           if(res && res.data && res.data.candles && res.data.candles.length > 30){
             bgClosesRef.current[it.sym] = res.data.candles.slice(-200).map(cc => cc.c);
           }
@@ -201,7 +209,7 @@ export function App(){
               if(dup) dupTag = ' · 🛑 DUBLUJE ' + dup.with + ' (corr ' + dup.corr + ')';
             }
           }catch(e){}
-          const pTag = sig.setupScore != null ? 'P ' + sig.setupScore + '%' : (sig.score > 0 ? '+' : '') + sig.score;
+          const pTag = sig.setupScore != null ? (sig.probCalibrated ? 'P ' + sig.setupScore + '%' : 'score ' + sig.setupScore) : (sig.score > 0 ? '+' : '') + sig.score;
           const msg = (strong ? '★ ' : '') + it.sym + ' ' + tfObj.label + ': ' + dtxt
             + ' (' + pTag + htfTag + eqTag + ')'
             + (sig.levels ? ' · SL ' + fmtPrice(sig.levels.sl) + ' · TP1 ' + fmtPrice(sig.levels.tp1) : '')

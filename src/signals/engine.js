@@ -296,7 +296,12 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     relVol: relVol ? { ...relVol, dir: (c.c >= c.o ? 1 : -1) } : null,
     htfDir, liquidity: liq,
   });
-  const weights = (srOverride && srOverride.__weights) || null;
+  /* [C3] wyuczone wagi w torze DECYZYJNYM stosujemy TYLKO gdy model jest
+     wiarygodny (reliable z k-fold: n_oos≥100, mediana avgR>0, 75-pct Brier<0.25).
+     W przeciwnym razie — nawet jeśli w Store są wagi „eksperymentalne" —
+     używamy DEFAULT_WEIGHTS. Kalibracja i kNN też tylko przy reliable. */
+  const reliable = !!(srOverride && srOverride.__reliable);
+  const weights = (reliable && srOverride && srOverride.__weights) || null;
 
   let dir = factors.dirConsensus > 0.06 ? 1 : factors.dirConsensus < -0.06 ? -1 : 0;
 
@@ -304,14 +309,14 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   if(dir === 1 && bullPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — LONG odrzucony'); }
   if(dir === -1 && bearPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — SHORT odrzucony'); }
 
-  /* P(win | dir) z modelu + kalibracja isotonic (jeśli wyuczona z ≥150 próbek) */
-  const calibMap = (srOverride && srOverride.__calib) || null;
+  /* P(win | dir) z modelu + kalibracja isotonic — [C3] kalibracja tylko reliable */
+  const calibMap = (reliable && srOverride && srOverride.__calib) || null;
   let prob = dir !== 0 ? predictProb(orientedVector(factors, dir), weights) : 0.5;
   if(dir !== 0 && calibMap) prob = applyIsotonic(prob, calibMap);
 
   /* Similarity Engine (kNN): "co robiły podobne historyczne setupy" —
-     nieliniowa, empiryczna korekta P (wpływ ograniczony, maks ~35%) */
-  const knnHist = (srOverride && srOverride.__knn) || null;
+     nieliniowa, empiryczna korekta P (wpływ ograniczony, maks ~35%) [C3] tylko reliable */
+  const knnHist = (reliable && srOverride && srOverride.__knn) || null;
   let similar = null;
   if(dir !== 0 && knnHist && knnHist.length >= 40){
     similar = similarOutcomes(knnHist, orientedVector(factors, dir), 20);
@@ -438,10 +443,18 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
       warns.push('Odrzucony przez EV/prob: P(win) ' + Math.round(prob*100) + '% · EV ' + ev.toFixed(2) + 'R (próg P ' + Math.round(minProb*100) + '%, wymagane EV>0)');
       out.dir = 0; dir = 0; delete out.levels; out.evBlock = true;
     } else {
-      out.sizing = positionSizing(prob, out.levels.rr1 || 1.5, { volState: regime.volState });
+      /* [W3/C3] sizing: Kelly WYŁĄCZNIE przy wiarygodnym, skalibrowanym modelu;
+         inaczej fixed-fractional (stałe ryzyko, niezależne od niepewnego p). */
+      const calibrated = !!(reliable && calibMap);
+      out.sizing = positionSizing(prob, out.levels.rr1 || 1.5,
+        { volState: regime.volState, mode: calibrated ? 'kelly' : 'fixed', calibrated });
     }
   }
   out.prob = +prob.toFixed(3);
+  /* [C3] flaga: czy P(win) jest SKALIBROWANE (reliable+calib). Gdy false — UI
+     ma pokazać „score (niekalibrowany)" zamiast „P xx%", bo setupScore to wtedy
+     surowe wyjście DEFAULT_WEIGHTS, nie realne prawdopodobieństwo. */
+  out.probCalibrated = !!(reliable && calibMap);
   out.setupScore = Math.round(prob * 100);
   if(similar) out.similar = { n: similar.n, wins: similar.wins, p: similar.pEmp, dist: similar.avgDist };
   out.strong = out.dir !== 0 && prob >= 0.66;
