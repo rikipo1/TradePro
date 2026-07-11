@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { aiPrompt, buildAiContext, callClaude, callGemini, tolerantJson } from '../ai/index.js';
 import { backtestEngine, walkForward } from '../backtest/engine.js';
+import { riskStatus } from '../signals/riskEngine.js';
 import { Store } from '../core/store.js';
 import { ChartCanvas } from '../components/ChartCanvas.jsx';
 import { EquityLine } from '../components/EquityLine.jsx';
@@ -266,6 +267,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     srWithHtf.__sym = item.sym;
     srWithHtf.__smc = prefs.smc || null;
     srWithHtf.__weights = Store.get('rt_model_weights', null);
+    srWithHtf.__calib = Store.get('rt_model_calib', null);
     if(prefs.minProb != null) srWithHtf.__minProb = prefs.minProb;
     return computeSignal(candlesSafe, ind, emaData, patterns, hasVol, null, srWithHtf);
   }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.minProb, prefs.waitPullback, prefs.smc, item.sym, wv]);
@@ -437,8 +439,14 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       Bus.show((strong ? '🔥 ' : '⚡ ') + msg);
     }
     if(prefs.autoTrade && signal.levels && !journal.some(e => e.paper && e.result === 'open' && e.sym === item.sym)){
-      addJournal(makePaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'auto', signal.score, signal.entryQuality));
-      Bus.show('🤖 AUTO-TRADE: otwarto ' + dtxt + ' (paper) @ ' + fmtPrice(signal.levels.entry));
+      /* Risk Engine: kill-switch blokuje AUTOMAT (dzienny limit / seria strat) */
+      const rs = riskStatus(journal);
+      if(rs.blocked){
+        Bus.show('🛑 Kill-switch: ' + rs.reason + ' — auto-trade wstrzymany');
+      } else {
+        addJournal(makePaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'auto', signal.score, signal.entryQuality));
+        Bus.show('🤖 AUTO-TRADE: otwarto ' + dtxt + ' (paper) @ ' + fmtPrice(signal.levels.entry));
+      }
     }
   }, [signal, prefs.alert, prefs.autoTrade, prefs.onlyStrong, prefs.waitPullback, item.sym, tf.label]);
 
@@ -1029,7 +1037,8 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   }
                   setBt({ busy:true, res:null });
                   setTimeout(() => {
-                    const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, { weights: Store.get('rt_model_weights', null) });
+                    const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc,
+                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), tfId: tf.id });
                     setBt({ busy:false, res:r });
                   }, 40);
                 }}>
@@ -1041,28 +1050,36 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   if(bt.busy || !ind || candlesSafe.length < 250){ if(!bt.busy) Bus.show('Do treningu wag trzeba ≥250 świec (zmień interwał na większy zakres)'); return; }
                   setBt({ busy:true, res:null });
                   setTimeout(() => {
-                    const wf = walkForward(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc);
+                    const wf = walkForward(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, tf.id);
                     if(wf && wf.ok){
                       Store.set('rt_model_weights', wf.weights);
+                      Store.set('rt_model_calib', wf.calib || null);
+                      Store.set('rt_model_meta', { n: wf.training.n, reliable: !!wf.reliable, oosBrier: wf.oosBrier, at: Date.now() });
                       setWv(v => v + 1);
-                      Bus.show('🧠 Wagi wyuczone — OOS: ' + (wf.outSample.n||0) + ' transakcji, PF ' + (wf.outSample.pf||0) + ', avg ' + (wf.outSample.avgR||0) + 'R');
+                      Bus.show('🧠 OOS: ' + (wf.outSample.n||0) + ' tr · PF ' + (wf.outSample.pf||0) + ' · ' + (wf.outSample.avgR||0) + 'R'
+                        + (wf.oosBrier != null ? ' · Brier ' + wf.oosBrier : '')
+                        + (wf.reliable ? '' : ' · ⚠ MAŁA PRÓBA (n=' + wf.training.n + ') — nie ufaj tym wagom'));
                     } else {
                       Bus.show('Trening nieudany: ' + (wf ? wf.reason : 'brak danych'));
                     }
-                    const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, { weights: Store.get('rt_model_weights', null) });
+                    const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc,
+                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), tfId: tf.id });
                     r.wf = wf;
                     setBt({ busy:false, res:r });
                   }, 40);
                 }}>
                 🧠 Trenuj wagi z backtestu (walk-forward)
               </button>
-              {Store.get('rt_model_weights', null) && (
-                <div style={{marginTop:6, fontSize:10.5, color:'var(--dim2)'}} className="mono">
-                  Model używa WYUCZONYCH wag.
-                  <button className="mono" style={{marginLeft:8, color:'var(--down)', background:'none', border:'none', textDecoration:'underline'}}
-                    onClick={() => { Store.set('rt_model_weights', null); setWv(v=>v+1); Bus.show('Przywrócono wagi domyślne'); }}>reset</button>
-                </div>
-              )}
+              {Store.get('rt_model_weights', null) && (() => {
+                const meta = Store.get('rt_model_meta', null);
+                return (
+                  <div style={{marginTop:6, fontSize:10.5, color: meta && !meta.reliable ? 'var(--ema9)' : 'var(--dim2)'}} className="mono">
+                    Model używa WYUCZONYCH wag{meta ? ' (n=' + meta.n + (meta.reliable ? ', wiarygodne' : ', ⚠ mała próba — traktuj jako eksperyment') + ')' : ''}.
+                    <button className="mono" style={{marginLeft:8, color:'var(--down)', background:'none', border:'none', textDecoration:'underline'}}
+                      onClick={() => { Store.set('rt_model_weights', null); Store.set('rt_model_calib', null); Store.set('rt_model_meta', null); setWv(v=>v+1); Bus.show('Przywrócono wagi domyślne'); }}>reset</button>
+                  </div>
+                );
+              })()}
               {bt.busy && <div style={{display:'flex', justifyContent:'center', padding:16}}><div className="loader" /></div>}
               {bt.res && !bt.busy && bt.res.stats && (
                 <div style={{marginTop:10}}>
@@ -1107,7 +1124,13 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       <div className="kv"><b>In-sample (trening 60%)</b><span className="mono">{bt.res.wf.inSample.n} tr · PF {bt.res.wf.inSample.pf} · {bt.res.wf.inSample.avgR}R</span></div>
                       <div className="kv"><b>Out-of-sample (test 40%)</b><span className="mono" style={{color: (bt.res.wf.outSample.avgR||0) > 0 ? 'var(--up)' : 'var(--down)', fontWeight:700}}>{bt.res.wf.outSample.n||0} tr · PF {bt.res.wf.outSample.pf||0} · {bt.res.wf.outSample.avgR||0}R</span></div>
                       <div className="kv"><b>Baseline (wagi domyślne)</b><span className="mono">{bt.res.wf.baseline ? bt.res.wf.baseline.n : '—'} tr · {bt.res.wf.baseline ? bt.res.wf.baseline.avgR : '—'}R</span></div>
-                      <div style={{fontSize:10.5, color:'var(--dim2)', marginTop:5, lineHeight:1.55}}>OOS to jedyny uczciwy dowód przewagi. Jeśli OOS PF ≤ 1 lub avgR ≤ 0 — model NIE ma edge na tym instrumencie; nie ufaj wyuczonym wagom.</div>
+                      {bt.res.wf.oosBrier != null && (
+                        <div className="kv"><b>Brier OOS (kalibracja P)</b><span className="mono" style={{color: bt.res.wf.oosBrier < 0.24 ? 'var(--up)' : 'var(--ema9)'}}>{bt.res.wf.oosBrier}<span style={{color:'var(--dim2)', fontWeight:500}}> (0.25 = moneta)</span></span></div>
+                      )}
+                      {!bt.res.wf.reliable && (
+                        <div style={{fontSize:10.5, color:'var(--ema9)', marginTop:5, lineHeight:1.55}}>⚠ Próba treningowa n={bt.res.wf.training.n} &lt; 150 lub OOS &lt; 30 transakcji — wynik statystycznie SŁABY. Traktuj jako eksperyment, nie dowód.</div>
+                      )}
+                      <div style={{fontSize:10.5, color:'var(--dim2)', marginTop:5, lineHeight:1.55}}>OOS to jedyny uczciwy dowód przewagi. Jeśli OOS PF ≤ 1 lub avgR ≤ 0 — model NIE ma edge na tym instrumencie; nie ufaj wyuczonym wagom. Trening z embargo (bez przecieku etykiet przez granicę splitu), HTF liczony identycznie jak live.</div>
                     </div>
                   )}
                   <div style={{marginTop:12, fontSize:11, color:'var(--dim2)', lineHeight:1.65}}>

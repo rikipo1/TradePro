@@ -3,14 +3,17 @@ import { findSRZones } from '../indicators/index.js';
 import { detectCandlePatterns } from '../patterns/index.js';
 import { computeSignal } from '../signals/engine.js';
 import { orientedVector } from '../signals/features.js';
-import { trainLogistic } from '../signals/model.js';
+import { trainLogistic, fitIsotonic, brierScore } from '../signals/model.js';
+import { htfTrend } from '../data/feed.js';
 
 /* ---------------- Faza 6: backtest / alerty ----------------
-   opts: { weights } — wagi modelu (wyuczone) przekazywane do silnika.
+   opts: { weights, calib, tfId } — wagi/kalibracja modelu + interwał (dla HTF).
    res.samples zbiera etykiety do treningu adaptacyjnych wag.           */
 export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, opts){
   const n = candles.length;
   const weights = (opts && opts.weights) || null;
+  const calib = (opts && opts.calib) || null;
+  const tfId = (opts && opts.tfId) || null;
   const res = { trades:[], equity:[0], stats:null, samples:[] };
   if(n < 90 || !ind) return res;
   const patsWrap = { list: detectCandlePatterns(candles, emaData[20], ind.atr, hasVol) };
@@ -18,10 +21,11 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
   let open = null, cooldownUntil = -1, sum = 0;
   const close = t => {
     res.trades.push(t); sum += t.r; res.equity.push(+sum.toFixed(2));
-    /* etykieta do treningu: cechy zorientowane na dir + wynik (1 wygrana / 0 strata) */
-    if(open && open.factors){
-      const y = t.out === 'TP1' ? 1 : t.out === 'SL' ? 0 : (t.r > 0 ? 1 : 0);
-      res.samples.push({ x: orientedVector(open.factors, open.dir), y, i0: open.i0 });
+    /* K5: etykieta tylko z JEDNOZNACZNYCH wyników (TP1-first lub SL-first).
+       Timeouty wyrzucamy z treningu — mieszały "częściowo dodatnie" z wygraną
+       i psuły definicję P(win). i1 zapisujemy do embargo w walk-forward. */
+    if(open && open.factors && (t.out === 'TP1' || t.out === 'SL')){
+      res.samples.push({ x: orientedVector(open.factors, open.dir), y: t.out === 'TP1' ? 1 : 0, i0: open.i0, i1: t.i1 });
     }
   };
   for(let i = warmup; i < n - 1; i++){
@@ -33,14 +37,14 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
       /* koszt round-turn w jednostkach R (spread/risk) — realizm CFD */
       const costR = open.risk > 0 ? (open.costPx / open.risk) : 0;
       if(hitSL){
-        close({ i0:open.i0, i1:i, dir, r:+(-1 - costR).toFixed(3), out:'SL', tp2:false });
+        close({ i0:open.i0, i1:i, dir, r:+(-1 - costR).toFixed(3), out:'SL', tp2:false, prob:open.prob });
         open = null; cooldownUntil = i + 5;
       } else if(hitTP){
-        close({ i0:open.i0, i1:i, dir, r:+(open.rr1 - costR).toFixed(3), out:'TP1', tp2:hitTP2 });
+        close({ i0:open.i0, i1:i, dir, r:+(open.rr1 - costR).toFixed(3), out:'TP1', tp2:hitTP2, prob:open.prob });
         open = null; cooldownUntil = i + 5;
       } else if(i - open.i0 >= maxBars){
         const raw = ((c.c - open.entry) / open.risk) * dir;
-        close({ i0:open.i0, i1:i, dir, r:+(raw - costR).toFixed(3), out:'TIMEOUT', tp2:false });
+        close({ i0:open.i0, i1:i, dir, r:+(raw - costR).toFixed(3), out:'TIMEOUT', tp2:false, prob:open.prob });
         open = null; cooldownUntil = i + 5;
       }
       continue;
@@ -52,6 +56,10 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
     if(minScore != null) zonesI.__minScore = minScore;
     if(smcCfg) zonesI.__smc = smcCfg;
     if(weights) zonesI.__weights = weights;
+    if(calib) zonesI.__calib = calib;
+    /* K2: HTF liczony PRZYCZYNOWO per świeca — dokładnie jak live. Bez tego
+       trening widział htf=0 zawsze, a live htf≠0 (rozjazd cech train/serve). */
+    if(tfId) zonesI.__htf = htfTrend(candles.slice(0, i + 1), tfId);
     const sig = computeSignal(candles, ind, emaData, patsWrap, hasVol, i, zonesI);
     if(sig && sig.dir !== 0 && sig.levels){
       open = {
@@ -61,7 +69,7 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
         risk:sig.levels.slDist,
         rr1:sig.levels.rr1 || 1.5,
         costPx: sig.levels.spreadPx || (ind.atr[i] ? ind.atr[i]*0.05 : 0),
-        factors: sig.factors, dir_: sig.dir,
+        factors: sig.factors, prob: sig.prob,
       };
     }
   }
@@ -111,21 +119,43 @@ export function statsOf(T){
 }
 
 /* WALK-FORWARD: trenuj wagi na pierwszych 60% danych, testuj OUT-OF-SAMPLE na
-   ostatnich 40% z wyuczonymi wagami. Zwraca wagi + porównanie IS/OOS/baseline.
-   To jest właściwy sposób weryfikacji, że przewaga nie jest przeuczeniem.   */
-export function walkForward(candles, ind, emaData, hasVol, sym, minScore, smcCfg){
+   ostatnich 40% z wyuczonymi wagami.
+   K1 (EMBARGO): transakcja otwarta tuż przed splitem rozstrzyga się PO splicie
+   — jej etykieta niesie informację z okresu testowego. Do treningu bierzemy
+   więc wyłącznie próbki ZAMKNIĘTE przed splitem (i1 < split). Zero przecieku.
+   K4: na predykcjach treningowych fitujemy kalibrację isotonic (gdy ≥150
+   próbek), a na OOS liczymy Brier — jedyną uczciwą miarę jakości P.        */
+export function walkForward(candles, ind, emaData, hasVol, sym, minScore, smcCfg, tfId){
   const n = candles.length;
   if(n < 250) return { ok:false, reason:'za mało danych (min 250 świec)' };
   const split = Math.floor(n * 0.6);
-  const base = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg);
-  const trainSamples = base.samples.filter(s => s.i0 < split);
+  const base = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { tfId });
+  const trainSamples = base.samples.filter(s => (s.i1 != null ? s.i1 : s.i0) < split); // embargo
   const tr = trainLogistic(trainSamples, { epochs: 500 });
   if(!tr.trained) return { ok:false, reason: tr.reason, weights: tr.weights };
-  const withW = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights });
-  const oosTrades = withW.trades.filter(t => t.i0 >= split);
-  const isTrades  = withW.trades.filter(t => t.i0 < split);
+
+  /* kalibracja: przelicz backtest z wyuczonymi wagami, weź predykcje z części
+     treningowej (zamknięte przed splitem) i dopasuj isotonic */
+  const withW = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, tfId });
+  const calPairs = withW.trades
+    .filter(t => t.i1 < split && (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
+    .map(t => ({ p: t.prob, y: t.out === 'TP1' ? 1 : 0 }));
+  const calib = fitIsotonic(calPairs, 150); // null gdy < 150 — nie kalibrujemy szumem
+
+  /* finalny przebieg: wagi + kalibracja (jeśli jest) — OOS liczony z tego */
+  const finalRun = calib
+    ? backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, calib, tfId })
+    : withW;
+  const oosTrades = finalRun.trades.filter(t => t.i0 >= split);
+  const isTrades  = finalRun.trades.filter(t => t.i1 < split);
+  const oosPairs = oosTrades
+    .filter(t => (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
+    .map(t => ({ p: t.prob, y: t.out === 'TP1' ? 1 : 0 }));
+
   return {
-    ok:true, split, weights: tr.weights, training: tr,
+    ok:true, split, weights: tr.weights, calib, training: tr,
     inSample: statsOf(isTrades), outSample: statsOf(oosTrades), baseline: base.stats,
+    oosBrier: brierScore(oosPairs),      // < 0.25 = lepiej niż moneta
+    reliable: tr.reliable && oosTrades.length >= 30,
   };
 }

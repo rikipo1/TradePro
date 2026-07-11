@@ -12,6 +12,7 @@ import { InfoScreen } from './screens/InfoScreen.jsx';
 import { JournalScreen } from './screens/JournalScreen.jsx';
 import { WatchlistScreen } from './screens/WatchlistScreen.jsx';
 import { analyzeSymbol } from './signals/engine.js';
+import { correlationMatrix, duplicatesExposure } from './signals/correlation.js';
 import { fmtPrice } from './utils/format.js';
 import { notifyUser } from './utils/notify.js';
 
@@ -120,6 +121,7 @@ export function App(){
   const bgPbRef = useRef({});
   const bgMacroRef = useRef(null);
   const bgBusyRef = useRef(false);
+  const bgClosesRef = useRef({}); // sym -> ostatnie zamknięcia (do korelacji)
   useEffect(() => {
     if(!prefs.bgScan || !prefs.alert) return;
     const tfObj = TFS.find(t => t.id === prefs.tf) || TFS[1];
@@ -132,7 +134,10 @@ export function App(){
           const it = wl[s];
           if(!it || it.sym === activeSym) continue;
           let res = null;
-          try{ res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc, Store.get('rt_model_weights', null)); }catch(e){ continue; }
+          try{ res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc, Store.get('rt_model_weights', null), Store.get('rt_model_calib', null)); }catch(e){ continue; }
+          if(res && res.data && res.data.candles && res.data.candles.length > 30){
+            bgClosesRef.current[it.sym] = res.data.candles.slice(-200).map(cc => cc.c);
+          }
           const sig = res && res.signal;
           if(!sig) continue;
 
@@ -182,9 +187,22 @@ export function App(){
           const htfTag = sig.htfDir && sig.htfDir === sig.dir ? ' ✓HTF' : '';
           const eq = sig.entryQuality;
           const eqTag = eq ? (eq.good ? ' ✓przy strefie' : eq.chase ? ' ⚠gonienie' : '') : '';
+          /* K3: korelacja portfela — ostrzeż, gdy sygnał dubluje otwartą ekspozycję
+             na skorelowanym instrumencie (DAX↔US500↔NAS100 ≈ jedno ryzyko) */
+          let dupTag = '';
+          try{
+            const openPos = journal.filter(e => e.paper && e.result === 'open').map(e => ({ sym:e.sym, dir:e.dir }));
+            if(openPos.length && Object.keys(bgClosesRef.current).length >= 2){
+              const corr = correlationMatrix(bgClosesRef.current);
+              const dup = duplicatesExposure(it.sym, sig.dir, openPos, corr, 0.7);
+              if(dup) dupTag = ' · 🛑 DUBLUJE ' + dup.with + ' (corr ' + dup.corr + ')';
+            }
+          }catch(e){}
+          const pTag = sig.setupScore != null ? 'P ' + sig.setupScore + '%' : (sig.score > 0 ? '+' : '') + sig.score;
           const msg = (strong ? '★ ' : '') + it.sym + ' ' + tfObj.label + ': ' + dtxt
-            + ' (' + (sig.score > 0 ? '+' : '') + sig.score + htfTag + eqTag + ')'
-            + (sig.levels ? ' · SL ' + fmtPrice(sig.levels.sl) + ' · TP1 ' + fmtPrice(sig.levels.tp1) : '');
+            + ' (' + pTag + htfTag + eqTag + ')'
+            + (sig.levels ? ' · SL ' + fmtPrice(sig.levels.sl) + ' · TP1 ' + fmtPrice(sig.levels.tp1) : '')
+            + dupTag;
           notifyUser('Rikipo Trader — ' + (strong ? 'MOCNY ' : '') + dtxt + ' ' + it.sym, msg);
           Bus.show((strong ? '🔥 ' : '⚡ ') + '[skaner] ' + msg);
           await new Promise(r => setTimeout(r, 400)); /* łagodzimy tempo zapytań */

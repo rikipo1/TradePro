@@ -25,24 +25,45 @@ function atrPercentile(atr, i, look) {
   return cnt > 0 ? below / cnt : 0.5;
 }
 
-export function classifyRegime(candles, i, adxSer, atr) {
-  const adx = (adxSer && adxSer[i] != null) ? adxSer[i] : null;
-  const eff = efficiencyRatio(candles, i, 14);
-  const volPct = atrPercentile(atr, i, 100);
+function rawType(candles, j, adxSer, atr) {
+  const adx = (adxSer && adxSer[j] != null) ? adxSer[j] : null;
+  const eff = efficiencyRatio(candles, j, 14);
+  const volPct = atrPercentile(atr, j, 100);
   const volState = volPct >= 0.8 ? 'high' : volPct <= 0.2 ? 'low' : 'normal';
-
   let type;
   if (adx == null) type = 'unknown';
   else if (adx >= 25 && eff >= 0.35) type = 'trend_strong';
   else if (adx >= 18 && eff >= 0.22) type = 'trend_weak';
   else if (volState === 'high' && eff >= 0.3) type = 'expansion';
   else type = 'range';
+  return { type, adx, eff, volPct, volState };
+}
 
-  // jakość trendu 0..1 (do skalowania pewności setupów trendowych)
+export function classifyRegime(candles, i, adxSer, atr) {
+  const cur = rawType(candles, i, adxSer, atr);
+  /* HISTEREZA: na granicy progu (ADX ~25) surowa klasyfikacja flapowała świeca
+     po świecy, a z nią bramki decyzji. Reżim uznajemy za ZMIENIONY dopiero po
+     3 kolejnych zgodnych świecach — szukamy wstecz najświeższego 3-biegu tego
+     samego typu (do 30 świec) i to on jest stanem. Pojedyncze bliki znikają. */
+  let type = cur.type;
+  if (i >= 2) {
+    const memo = {};
+    const raw = (j) => (memo[j] != null ? memo[j] : (memo[j] = rawType(candles, j, adxSer, atr).type));
+    for (let j = i; j >= Math.max(2, i - 30); j--) {
+      const t = raw(j);
+      if (t === raw(j - 1) && t === raw(j - 2)) { type = t; break; }
+    }
+  }
+
   const trendQuality = Math.max(0, Math.min(1,
-    (adx != null ? Math.min(1, adx / 40) : 0) * 0.6 + eff * 0.4));
+    (cur.adx != null ? Math.min(1, cur.adx / 40) : 0) * 0.6 + cur.eff * 0.4));
 
-  return { type, adx: adx != null ? +adx.toFixed(1) : null, effRatio: +eff.toFixed(2), volPct: +volPct.toFixed(2), volState, trendQuality: +trendQuality.toFixed(2) };
+  return {
+    type,
+    adx: cur.adx != null ? +cur.adx.toFixed(1) : null,
+    effRatio: +cur.eff.toFixed(2), volPct: +cur.volPct.toFixed(2),
+    volState: cur.volState, trendQuality: +trendQuality.toFixed(2),
+  };
 }
 
 /* czy w danym reżimie preferujemy setupy trendowe czy kontr-trendowe/range */

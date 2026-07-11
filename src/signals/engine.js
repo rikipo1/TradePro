@@ -8,7 +8,7 @@ import { buildPullbackPlan } from './pullback.js';
 import { buildOpportunities } from './opportunities.js';
 import { classifyRegime } from './regime.js';
 import { extractFactors, orientedVector } from './features.js';
-import { predictProb, expectedValueR } from './model.js';
+import { predictProb, expectedValueR, applyIsotonic } from './model.js';
 import { liquidityModel, drawOnLiquidity } from './liquidity.js';
 import { volumeProfile } from './volumeProfile.js';
 import { positionSizing } from './sizing.js';
@@ -303,8 +303,10 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   if(dir === 1 && bullPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — LONG odrzucony'); }
   if(dir === -1 && bearPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — SHORT odrzucony'); }
 
-  /* P(win | dir) z modelu */
+  /* P(win | dir) z modelu + kalibracja isotonic (jeśli wyuczona z ≥150 próbek) */
+  const calibMap = (srOverride && srOverride.__calib) || null;
   let prob = dir !== 0 ? predictProb(orientedVector(factors, dir), weights) : 0.5;
+  if(dir !== 0 && calibMap) prob = applyIsotonic(prob, calibMap);
 
   /* blokada kontry HTF przy niskim P(win) */
   if(dir !== 0 && htfDir !== 0 && dir !== htfDir && prob < 0.66){
@@ -540,7 +542,7 @@ export function indicatorsFor(candles, tfId){
   for(let i=0;i<EMA_DEFS.length;i++){ emaData[EMA_DEFS[i].n] = emaSeries(closes, EMA_DEFS[i].n); }
   return { ind, emaData, hasVol };
 }
-export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, smcCfg, weights){
+export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, smcCfg, weights, calib){
   const data = await getChart(symbol, tf, source);
   if(!data || !data.candles || data.candles.length < 30) return { data, signal:null };
   const pack = indicatorsFor(data.candles, tf.id);
@@ -557,6 +559,7 @@ export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, 
   srWithHtf.__sym = symbol;
   srWithHtf.__smc = smcCfg || null;
   srWithHtf.__weights = weights || null;
+  srWithHtf.__calib = calib || null;
   const signal = computeSignal(data.candles, pack.ind, pack.emaData, patterns, pack.hasVol, null, srWithHtf);
   return { data, signal, demo: !!data.demo };
 }
