@@ -268,6 +268,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     srWithHtf.__smc = prefs.smc || null;
     srWithHtf.__weights = Store.get('rt_model_weights', null);
     srWithHtf.__calib = Store.get('rt_model_calib', null);
+    srWithHtf.__knn = Store.get('rt_knn_history', null);
     if(prefs.minProb != null) srWithHtf.__minProb = prefs.minProb;
     return computeSignal(candlesSafe, ind, emaData, patterns, hasVol, null, srWithHtf);
   }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.minProb, prefs.waitPullback, prefs.smc, item.sym, wv]);
@@ -384,6 +385,30 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       entryQuality: eq || null,
     };
   };
+  /* zlecenie LIMIT w strefę okazji (paper): czeka aż cena DOJDZIE do wejścia,
+     kasuje się przy unieważnieniu struktury albo po 12 h */
+  const armLimit = (op) => {
+    if(!signal || signal.atr == null || op.entry == null) return;
+    const dir = op.dir, entry = op.entry;
+    let sl;
+    if(op.kind === 'pullback' && signal.pullback && signal.pullback.invalidation != null) sl = signal.pullback.invalidation;
+    else sl = dir === 1 ? entry - signal.atr*1.1 : entry + signal.atr*1.1;
+    const risk = Math.abs(entry - sl);
+    if(!(risk > 0)) return;
+    const tp1 = op.target != null ? op.target : (dir === 1 ? entry + risk*1.6 : entry - risk*1.6);
+    const tp2 = dir === 1 ? entry + risk*2.5 : entry - risk*2.5;
+    addJournal({
+      id: Date.now(), ts: Date.now(), sym:item.sym, name:item.name, tf:tf.id,
+      dir, entry, sl, tp1, tp2, risk,
+      rr1: +(Math.abs(tp1 - entry)/Math.max(risk, 1e-9)).toFixed(2),
+      result:'pending', r:0, paper:true, src:'limit:' + op.kind,
+      score: signal.setupScore != null ? signal.setupScore : null,
+      pendingUntil: Date.now() + 12*3600*1000,
+      note: op.title,
+    });
+    Bus.show('⏳ LIMIT ' + (dir > 0 ? 'LONG' : 'SHORT') + ' @ ' + fmtPrice(entry) + ' — czeka na dojście ceny (ważne 12 h)');
+  };
+
   const openTicket = (dir) => {
     if(!candlesSafe.length){
       Bus.show('Poczekaj na dane');
@@ -626,6 +651,13 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 {op.note ? (op.factors && op.factors.length ? ' — ' : '') + op.note : ''}
               </div>
             )}
+            {op.entry != null && op.grade !== 'D' && op.state !== 'ready' && op.state !== 'in_zone'
+              && !journal.some(e => e.paper && (e.result === 'open' || e.result === 'pending') && e.sym === item.sym) && (
+              <button className="chip mono" onClick={(ev) => { ev.stopPropagation(); armLimit(op); }}
+                style={{justifyContent:'center', padding:'8px 0', fontSize:12, fontWeight:800, color:'var(--ema9)', borderColor:'rgba(255,201,77,.5)', background:'rgba(255,201,77,.08)'}}>
+                ⏳ Zleć LIMIT w strefę @ {fmtPrice(op.entry)} · paper
+              </button>
+            )}
           </div>
         );
       })()}
@@ -738,6 +770,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 {signal.ev != null && <span className="mono" style={{fontSize:11, fontWeight:700, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border2)', color: signal.ev>0?'var(--up)':'var(--down)'}}>EV {signal.ev>0?'+':''}{signal.ev}R</span>}
                 {signal.regime && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color:'var(--dim)'}}>{signal.regime.type} · ADX {signal.regime.adx}</span>}
                 {signal.sizing && signal.dir !== 0 && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color:'var(--dim)'}}>ryzyko {signal.sizing.riskPct}%</span>}
+                {signal.similar && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid rgba(79,216,255,.3)', color:'var(--cyan)'}}>≈ {signal.similar.n} podobnych: {signal.similar.wins}/{signal.similar.n} traf</span>}
               </div>
             )}
 
@@ -1038,7 +1071,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   setBt({ busy:true, res:null });
                   setTimeout(() => {
                     const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc,
-                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), tfId: tf.id });
+                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
                     setBt({ busy:false, res:r });
                   }, 40);
                 }}>
@@ -1054,6 +1087,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                     if(wf && wf.ok){
                       Store.set('rt_model_weights', wf.weights);
                       Store.set('rt_model_calib', wf.calib || null);
+                      Store.set('rt_knn_history', wf.samples && wf.samples.length >= 40 ? wf.samples : null);
                       Store.set('rt_model_meta', { n: wf.training.n, reliable: !!wf.reliable, oosBrier: wf.oosBrier, at: Date.now() });
                       setWv(v => v + 1);
                       Bus.show('🧠 OOS: ' + (wf.outSample.n||0) + ' tr · PF ' + (wf.outSample.pf||0) + ' · ' + (wf.outSample.avgR||0) + 'R'
@@ -1063,7 +1097,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       Bus.show('Trening nieudany: ' + (wf ? wf.reason : 'brak danych'));
                     }
                     const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc,
-                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), tfId: tf.id });
+                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
                     r.wf = wf;
                     setBt({ busy:false, res:r });
                   }, 40);
@@ -1134,12 +1168,13 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                     </div>
                   )}
                   <div style={{marginTop:12, fontSize:11, color:'var(--dim2)', lineHeight:1.65}}>
-                    Metodologia: wejście po close świecy sygnału · wyjście w całości na TP1 (+1.5R) lub SL (−1R) ·
-                    trafność liczona wyłącznie z transakcji zamkniętych na TP/SL (timeouty pominięte) ·
-                    SL i TP w tej samej świecy = liczony SL (pesymistycznie) · po 60 świecach wyjście po close ·
-                    5 świec przerwy między transakcjami · strefy S/R liczone przyczynowo (bez zaglądania w przyszłość) ·
-                    formacje geometryczne pominięte · spread instrumentu odjęty od każdego R (poślizg nadal pominięty) ·
-                    historia nie gwarantuje przyszłości.
+                    Metodologia: wejście po close świecy sygnału · <b style={{color:'var(--dim)'}}>dynamiczne zarządzanie</b>:
+                    po +1R stop przesuwany na wejście (BE), na TP1 realizacja 50% pozycji, reszta („runner")
+                    z trailingiem za 8-świecowym dołkiem/szczytem ±0.25 ATR aż do TP2 lub wybicia stopa ·
+                    SL i cel w tej samej świecy = liczony stop (pesymistycznie) · time-stop po 60 świecach ·
+                    5 świec przerwy między transakcjami · strefy S/R i HTF liczone przyczynowo (zero look-ahead) ·
+                    spread odjęty od każdego R (poślizg pominięty) · trening wag: tylko transakcje ZAMKNIĘTE przed
+                    splitem (embargo) · historia nie gwarantuje przyszłości.
                   </div>
                 </div>
               )}

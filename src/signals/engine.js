@@ -9,6 +9,7 @@ import { buildOpportunities } from './opportunities.js';
 import { classifyRegime } from './regime.js';
 import { extractFactors, orientedVector } from './features.js';
 import { predictProb, expectedValueR, applyIsotonic } from './model.js';
+import { similarOutcomes, blendProb } from './similarity.js';
 import { liquidityModel, drawOnLiquidity } from './liquidity.js';
 import { volumeProfile } from './volumeProfile.js';
 import { positionSizing } from './sizing.js';
@@ -199,7 +200,7 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   }
 
   /* 5. ORDER BLOCK — cena reagująca na OB */
-  if(smc.ob){
+  if(smc.ob && !smc.ob.mitigated){
     if(smc.ob.inside || smc.ob.distAtr < 0.4){
       add(smc.ob.dir * 9, 'Cena przy Order Block ' + (smc.ob.dir > 0 ? 'popytowym' : 'podażowym') + ' (świeży, reakcja instytucji)');
       smcLocation += smc.ob.dir;
@@ -307,6 +308,15 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   const calibMap = (srOverride && srOverride.__calib) || null;
   let prob = dir !== 0 ? predictProb(orientedVector(factors, dir), weights) : 0.5;
   if(dir !== 0 && calibMap) prob = applyIsotonic(prob, calibMap);
+
+  /* Similarity Engine (kNN): "co robiły podobne historyczne setupy" —
+     nieliniowa, empiryczna korekta P (wpływ ograniczony, maks ~35%) */
+  const knnHist = (srOverride && srOverride.__knn) || null;
+  let similar = null;
+  if(dir !== 0 && knnHist && knnHist.length >= 40){
+    similar = similarOutcomes(knnHist, orientedVector(factors, dir), 20);
+    if(similar) prob = blendProb(prob, similar);
+  }
 
   /* blokada kontry HTF przy niskim P(win) */
   if(dir !== 0 && htfDir !== 0 && dir !== htfDir && prob < 0.66){
@@ -433,6 +443,7 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   }
   out.prob = +prob.toFixed(3);
   out.setupScore = Math.round(prob * 100);
+  if(similar) out.similar = { n: similar.n, wins: similar.wins, p: similar.pEmp, dist: similar.avgDist };
   out.strong = out.dir !== 0 && prob >= 0.66;
   out.regime = regime;
   out.factors = {
@@ -490,7 +501,7 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     trend: smc.ms ? smc.ms.trend : 0,
     strefa: smc.pd ? (smc.pd.zone + ' ' + smc.pd.pct + '%') : null,
     bos: smc.bc.bos, choch: smc.bc.choch,
-    orderBlock: smc.ob ? (smc.ob.dir>0?'popytowy':'podażowy') + (smc.ob.inside?' (w środku)':'') : null,
+    orderBlock: smc.ob ? (smc.ob.dir>0?'popytowy':'podażowy') + (smc.ob.inside?' (w środku)':'') + (smc.ob.mitigated?' · zmitygowany':'') : null,
     fvg: (smc.fvg.nearest && smc.fvg.nearDistAtr!=null && smc.fvg.nearDistAtr<0.8) ? (smc.fvg.nearest.dir>0?'popytowy':'podażowy') : null,
     sweep: smc.sweep ? smc.sweep.txt : null,
     displacement: smc.disp,

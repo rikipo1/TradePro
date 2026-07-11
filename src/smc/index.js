@@ -77,10 +77,12 @@ export function detectBosChoch(candles, ms, i, atr){
 export function detectFVG(candles, i, atr){
   const out = [];
   const from = Math.max(2, i-30);
+  /* filtr wielkości: mikro-luka < 0.3×ATR to szum, nie imbalance instytucjonalny */
+  const minGap = (atr || 0) * 0.3;
   for(let k=from;k<=i;k++){
     const a = candles[k-2], c = candles[k];
-    if(a.h < c.l){ out.push({ i:k, dir:1, lo:a.h, hi:c.l, mid:(a.h+c.l)/2 }); }
-    else if(a.l > c.h){ out.push({ i:k, dir:-1, lo:c.h, hi:a.l, mid:(c.h+a.l)/2 }); }
+    if(a.h < c.l && (c.l - a.h) >= minGap){ out.push({ i:k, dir:1, lo:a.h, hi:c.l, mid:(a.h+c.l)/2 }); }
+    else if(a.l > c.h && (a.l - c.h) >= minGap){ out.push({ i:k, dir:-1, lo:c.h, hi:a.l, mid:(c.h+a.l)/2 }); }
   }
   // niewypełnione: cena po utworzeniu nie przekroczyła luki na wskroś
   const price = candles[i].c;
@@ -111,6 +113,18 @@ export function detectOrderBlock(candles, ms, i, atr){
     const body = Math.abs(c.c - c.o);
     if(body < atr*1.2) continue;
     const dir = c.c > c.o ? 1 : -1;
+
+    /* WYMÓG ZŁAMANIA STRUKTURY: instytucjonalny OB to świeca przed impulsem,
+       który ŁAMIE lokalną strukturę — nie każda duża świeca. Proxy: zamknięcie
+       impulsu poza ekstremum 10 poprzednich świec. */
+    let ext = dir === 1 ? -Infinity : Infinity;
+    for(let q=Math.max(0,k-10);q<k;q++){
+      if(dir === 1 && candles[q].h > ext) ext = candles[q].h;
+      if(dir === -1 && candles[q].l < ext) ext = candles[q].l;
+    }
+    const brokeStructure = dir === 1 ? c.c > ext : c.c < ext;
+    if(!brokeStructure) continue;
+
     // przeciwna świeca tuż przed impulsem
     let ob = null;
     for(let j=k-1;j>=k-3 && j>=0;j--){
@@ -118,11 +132,27 @@ export function detectOrderBlock(candles, ms, i, atr){
       if(dir === 1 && p.c < p.o){ ob = { i:j, lo:p.l, hi:p.h, dir:1 }; break; }
       if(dir === -1 && p.c > p.o){ ob = { i:j, lo:p.l, hi:p.h, dir:-1 }; break; }
     }
-    if(ob){
-      const inside = price >= ob.lo && price <= ob.hi;
-      const distAtr = inside ? 0 : Math.min(Math.abs(price-ob.lo), Math.abs(price-ob.hi))/atr;
-      return { ...ob, kImpulse:k, inside, distAtr:+distAtr.toFixed(2) };
+    if(!ob) continue;
+
+    /* MITYGACJA: OB "zużywa się" przy każdym powrocie ceny w strefę; przebicie
+       na wskroś unieważnia go całkiem. Śledzimy od impulsu do teraz. */
+    let touches = 0, inZone = false, invalid = false;
+    for(let j=k+1;j<=i;j++){
+      const cd = candles[j];
+      const through = dir === 1 ? cd.c < ob.lo - atr*0.1 : cd.c > ob.hi + atr*0.1;
+      if(through){ invalid = true; break; }
+      const entered = dir === 1 ? cd.l <= ob.hi : cd.h >= ob.lo;
+      if(entered && !inZone){ touches++; inZone = true; }
+      else if(!entered) inZone = false;
     }
+    if(invalid) continue; // szukaj starszego/świeższego ważnego OB
+
+    const inside = price >= ob.lo && price <= ob.hi;
+    const distAtr = inside ? 0 : Math.min(Math.abs(price-ob.lo), Math.abs(price-ob.hi))/atr;
+    /* pierwsza reakcja w strefie (touches===1 gdy właśnie jesteśmy w środku)
+       jest OK; OB uznajemy za zmitygowany po wcześniejszym pełnym teście */
+    const mitigated = inside ? touches > 1 : touches > 0;
+    return { ...ob, kImpulse:k, inside, distAtr:+distAtr.toFixed(2), mitigated, touches };
   }
   return null;
 }

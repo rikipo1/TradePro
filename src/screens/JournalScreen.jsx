@@ -29,13 +29,15 @@ export function JournalScreen({ journal, setJournal }){
   const [busyPx, setBusyPx] = useState(false);
   const [expanded, setExpanded] = useState(null);
 
-  const closed = journal.filter(e => e.result !== 'open');
+  /* statystyki tylko z ROZSTRZYGNIĘTYCH transakcji — pending/cancelled
+     (zlecenia limit) nie są transakcjami i nie mogą zaniżać średnich */
+  const closed = journal.filter(e => e.result !== 'open' && e.result !== 'pending' && e.result !== 'cancelled');
   const wins = closed.filter(e => (e.r || 0) > 0.2).length;
   const losses = closed.filter(e => (e.r || 0) < -0.2).length;
   const sumR = closed.reduce((a, e) => a + (e.r || 0), 0);
   const grossW = closed.reduce((a, e) => a + ((e.r || 0) > 0 ? e.r : 0), 0);
   const grossL = closed.reduce((a, e) => a + ((e.r || 0) < 0 ? -e.r : 0), 0);
-  const openN = journal.length - closed.length;
+  const openN = journal.filter(e => e.result === 'open' || e.result === 'pending').length;
 
   const loadPx = useCallback(async () => {
     const openP = journal.filter(e => e.paper && e.result === 'open');
@@ -156,14 +158,17 @@ export function JournalScreen({ journal, setJournal }){
                 </div>
               </div>
               <span className="wl-chip mono" style={{
-                background: e.result === 'open' ? 'rgba(79,216,255,.13)' : ((e.r || 0) > 0 ? 'rgba(47,214,174,.14)' : (e.r || 0) < 0 ? 'rgba(255,107,94,.14)' : 'rgba(143,176,172,.12)'),
-                color: e.result === 'open' ? 'var(--cyan)' : ((e.r || 0) > 0 ? 'var(--up)' : (e.r || 0) < 0 ? 'var(--down)' : 'var(--dim)'),
+                background: e.result === 'open' ? 'rgba(79,216,255,.13)' : e.result === 'pending' ? 'rgba(255,201,77,.13)' : ((e.r || 0) > 0 ? 'rgba(47,214,174,.14)' : (e.r || 0) < 0 ? 'rgba(255,107,94,.14)' : 'rgba(143,176,172,.12)'),
+                color: e.result === 'open' ? 'var(--cyan)' : e.result === 'pending' ? 'var(--ema9)' : ((e.r || 0) > 0 ? 'var(--up)' : (e.r || 0) < 0 ? 'var(--down)' : 'var(--dim)'),
               }}>
                 {e.result === 'open'
                   ? (() => {
                       const fl = paperFloating(e, q[e.sym]);
-                      return fl == null ? 'OTWARTA' : 'LIVE ' + (fl > 0 ? '+' : '') + fl + 'R';
+                      const tag = e.stage === 'runner' ? 'RUN ' : e.stage === 'be' ? 'BE→ ' : 'LIVE ';
+                      return fl == null ? (e.stage === 'runner' ? 'RUNNER' : 'OTWARTA') : tag + (fl > 0 ? '+' : '') + fl + 'R';
                     })()
+                  : e.result === 'pending' ? '⏳ LIMIT'
+                  : e.result === 'cancelled' ? 'ANULOWANE'
                   : (rd ? rd[1] : (e.result === 'manual' ? 'RYNEK' : String(e.result).toUpperCase())) + ' ' + ((e.r || 0) > 0 ? '+' : '') + (e.r || 0) + 'R'}
               </span>
             </div>

@@ -101,7 +101,7 @@ export function buildOpportunities(ctx) {
   }
 
   /* 7) reakcja na Order Block */
-  if (smc.ob && (smc.ob.inside || smc.ob.distAtr < 0.4)) {
+  if (smc.ob && !smc.ob.mitigated && (smc.ob.inside || smc.ob.distAtr < 0.4)) {
     const d = smc.ob.dir;
     const c = clamp(50 + align(d) + (smc.ob.inside ? 6 : 0));
     ops.push({

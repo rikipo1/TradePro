@@ -85,7 +85,7 @@ export function buildPullbackPlan(ctx) {
   add(v50, 'EMA50', W.ema50);
   add(vw, 'VWAP', W.vwap);
   add(ms.mid, 'równowaga 50%', W.eq);
-  if (smc.ob && smc.ob.dir === dir) {
+  if (smc.ob && smc.ob.dir === dir && !smc.ob.mitigated) {
     add(dir === 1 ? smc.ob.hi : smc.ob.lo, 'Order Block', W.ob, smc.ob.lo, smc.ob.hi);
   }
   if (smc.fvg && smc.fvg.nearest && smc.fvg.nearest.dir === dir) {

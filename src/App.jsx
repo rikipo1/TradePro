@@ -79,7 +79,10 @@ export function App(){
   const setAi = (fn) => setAiRaw(fn);
   const addJournal = (e) => setJournal(list => [e, ...list]);
   const paperNote = (e) => {
-    const msg = 'PAPER ' + e.sym + ' ' + (e.dir > 0 ? 'LONG' : 'SHORT') + ': ' + String(e.result).toUpperCase()
+    let msg;
+    if(e.result === 'open') msg = 'PAPER ' + e.sym + ' ' + (e.dir > 0 ? 'LONG' : 'SHORT') + ': LIMIT aktywowany @ ' + fmtPrice(e.entry);
+    else if(e.result === 'cancelled') msg = 'PAPER ' + e.sym + ': zlecenie LIMIT anulowane';
+    else msg = 'PAPER ' + e.sym + ' ' + (e.dir > 0 ? 'LONG' : 'SHORT') + ': ' + String(e.result).toUpperCase()
       + ' ' + (e.r > 0 ? '+' : '') + e.r + 'R @ ' + fmtPrice(e.exit);
     Bus.show('📒 ' + msg);
     notifyUser('Rikipo Paper', msg);
@@ -89,7 +92,7 @@ export function App(){
   /* monitor otwartych pozycji paper (co 15 s, także poza aktywnym wykresem) */
   useEffect(() => {
     const h = setInterval(async () => {
-      const openP = journal.filter(e => e.paper && e.result === 'open');
+      const openP = journal.filter(e => e.paper && (e.result === 'open' || e.result === 'pending'));
       if(!openP.length) return;
       const syms = Array.from(new Set(openP.map(e => e.sym)));
       for(let s=0;s<syms.length;s++){
