@@ -663,7 +663,10 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 {op.note ? (op.factors && op.factors.length ? ' — ' : '') + op.note : ''}
               </div>
             )}
-            {op.entry != null && op.grade !== 'D' && op.state !== 'ready' && op.state !== 'in_zone'
+            {/* zlecenie LIMIT (paper) dostępne na KAŻDYM interwale — wcześniej znikało
+                na niższych TF, bo cena zwykle jest już „w strefie" (state in_zone/ready).
+                Zdejmujemy to wykluczenie: LIMIT działa tak samo jak na H1 na wszystkich TF. */}
+            {op.entry != null && op.grade !== 'D'
               && !journal.some(e => e.paper && (e.result === 'open' || e.result === 'pending') && e.sym === item.sym) && (
               <button className="chip mono" onClick={(ev) => { ev.stopPropagation(); armLimit(op); }}
                 style={{justifyContent:'center', padding:'8px 0', fontSize:12, fontWeight:800, color:'var(--ema9)', borderColor:'rgba(255,201,77,.5)', background:'rgba(255,201,77,.08)'}}>
