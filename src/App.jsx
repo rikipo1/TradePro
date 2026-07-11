@@ -12,6 +12,7 @@ import { InfoScreen } from './screens/InfoScreen.jsx';
 import { JournalScreen } from './screens/JournalScreen.jsx';
 import { WatchlistScreen } from './screens/WatchlistScreen.jsx';
 import { analyzeSymbol } from './signals/engine.js';
+import { riskStatus } from './signals/riskEngine.js';
 import { correlationMatrix, duplicatesExposure } from './signals/correlation.js';
 import { fmtPrice } from './utils/format.js';
 import { notifyUser } from './utils/notify.js';
@@ -126,6 +127,7 @@ export function App(){
   const bgPbRef = useRef({});
   const bgMacroRef = useRef(null);
   const bgBusyRef = useRef(false);
+  const bgRiskRef = useRef(null); // [M5] ostatnio zgłoszony powód stopu dnia (anty-spam toastu)
   const bgClosesRef = useRef({}); // sym -> ostatnie zamknięcia (do korelacji)
   useEffect(() => {
     if(!prefs.bgScan || !prefs.alert) return;
@@ -135,6 +137,16 @@ export function App(){
       bgBusyRef.current = true;
       try{
         const activeSym = (screen === 'chart' && active) ? active.sym : null;
+        /* [M5] Risk Engine (kill-switch konta): przy przekroczeniu dziennego limitu
+           strat / serii strat NIE alarmujemy o nowych wejściach; toast raz na powód. */
+        const rs = riskStatus(journal, { maxDailyLossR: prefs.maxDailyLossR, maxConsecLoss: prefs.maxConsecLoss });
+        if(rs.blocked){
+          if(bgRiskRef.current !== rs.reason){
+            bgRiskRef.current = rs.reason;
+            notifyUser('Rikipo Trader — ⛔ Stop dnia', rs.reason);
+            Bus.show('⛔ Stop dnia: ' + rs.reason);
+          }
+        } else { bgRiskRef.current = null; }
         for(let s=0;s<wl.length;s++){
           const it = wl[s];
           if(!it || it.sym === activeSym) continue;
@@ -183,6 +195,7 @@ export function App(){
             }
           }
 
+          if(rs.blocked) continue;   // [M5] stop dnia — pomijamy alerty o nowych wejściach (okazje/makro powyżej działają)
           if(sig.dir === 0) continue;
           if(prefs.onlyStrong && !sig.strong) continue;
           if(prefs.waitPullback && sig.entryQuality && sig.entryQuality.chase && !sig.strong) continue;
@@ -225,7 +238,7 @@ export function App(){
     const first = setTimeout(runScan, 4000);
     const h = setInterval(runScan, 45000);
     return () => { clearTimeout(first); clearInterval(h); };
-  }, [prefs.bgScan, prefs.alert, prefs.pbAlert, prefs.tf, prefs.source, prefs.onlyStrong, prefs.waitPullback, prefs.minScore, wl, screen, active]);
+  }, [prefs.bgScan, prefs.alert, prefs.pbAlert, prefs.tf, prefs.source, prefs.onlyStrong, prefs.waitPullback, prefs.minScore, prefs.maxDailyLossR, prefs.maxConsecLoss, journal, wl, screen, active]);
 
   const openChart = (item) => {
     setActive(item);
@@ -244,7 +257,7 @@ export function App(){
       {screen === 'chart' && active && (
         <ChartScreen item={active} onBack={() => setScreen('list')} prefs={prefs} setPrefs={setPrefs} ai={ai} setAi={setAi} addJournal={addJournal} journal={journal} resolveTick={resolveTick} />
       )}
-      {screen === 'journal' && <JournalScreen journal={journal} setJournal={setJournal} />}
+      {screen === 'journal' && <JournalScreen journal={journal} setJournal={setJournal} prefs={prefs} />}
       {screen === 'info' && <InfoScreen prefs={prefs} setPrefs={setPrefs} ai={ai} setAi={setAi} cap={cap} setCap={setCap} wl={wl} setWl={setWl} journal={journal} setJournal={setJournal} />}
 
       <div className="nav">

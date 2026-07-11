@@ -98,6 +98,27 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
         <div style={{display:'flex', justifyContent:'space-between', fontSize:10.5, color:'var(--dim2)', marginTop:2}}>
           <span>20 · więcej sygnałów</span><span>55 · tylko najpewniejsze</span>
         </div>
+
+        {/* [M5] Risk Engine — limity konta (kill-switch) */}
+        <div style={{fontSize:11.5, color:'var(--dim2)', margin:'12px 0 6px'}}>
+          <b style={{color:'var(--text)'}}>🛡 Kill-switch konta</b> — po przekroczeniu skaner przestaje alarmować o nowych wejściach, a paper blokuje otwieranie (wyjścia działają).
+        </div>
+        <div style={{display:'flex', gap:10}}>
+          <label style={{flex:1, fontSize:11.5, color:'var(--dim)'}}>
+            Dzienny limit strat (R)
+            <input type="number" min="1" max="20" step="0.5"
+              value={prefs.maxDailyLossR != null ? prefs.maxDailyLossR : 3}
+              onChange={e => { const v = parseFloat(e.target.value); setPrefs(p => ({ ...p, maxDailyLossR: isFinite(v) && v > 0 ? v : 3 })); }}
+              style={{width:'100%', marginTop:4, padding:'7px 9px', background:'var(--bg)', border:'1px solid var(--border2)', borderRadius:8, color:'var(--text)'}} className="mono" />
+          </label>
+          <label style={{flex:1, fontSize:11.5, color:'var(--dim)'}}>
+            Seria strat z rzędu
+            <input type="number" min="2" max="15" step="1"
+              value={prefs.maxConsecLoss != null ? prefs.maxConsecLoss : 4}
+              onChange={e => { const v = parseInt(e.target.value, 10); setPrefs(p => ({ ...p, maxConsecLoss: isFinite(v) && v > 0 ? v : 4 })); }}
+              style={{width:'100%', marginTop:4, padding:'7px 9px', background:'var(--bg)', border:'1px solid var(--border2)', borderRadius:8, color:'var(--text)'}} className="mono" />
+          </label>
+        </div>
         <div style={{fontSize:12.5, color:'var(--dim)', lineHeight:1.75, marginTop:10}}>
           <b style={{color:'var(--text)'}}>Skaner tła</b> przechodzi całą listę obserwowanych na wybranym
           interwale co ~45 s i alarmuje o nowych sygnałach nawet bez otwartego wykresu

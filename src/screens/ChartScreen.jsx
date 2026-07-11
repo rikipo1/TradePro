@@ -284,6 +284,13 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     return ops.find(o => o.kind !== 'signal-now') || null;
   }, [signal]);
 
+  /* [M5] stan ryzyka konta (kill-switch) — blokuje OTWIERANIE nowych pozycji;
+     zarządzanie otwartymi działa normalnie (nie blokujemy wyjść). */
+  const riskState = useMemo(
+    () => riskStatus(journal, { maxDailyLossR: prefs.maxDailyLossR, maxConsecLoss: prefs.maxConsecLoss }),
+    [journal, prefs.maxDailyLossR, prefs.maxConsecLoss]
+  );
+
   const sigLevels = useMemo(() => {
     const out = [];
     if(signal && signal.dir !== 0 && signal.levels){
@@ -469,8 +476,8 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       Bus.show((strong ? '🔥 ' : '⚡ ') + msg);
     }
     if(prefs.autoTrade && signal.levels && !journal.some(e => e.paper && e.result === 'open' && e.sym === item.sym)){
-      /* Risk Engine: kill-switch blokuje AUTOMAT (dzienny limit / seria strat) */
-      const rs = riskStatus(journal);
+      /* Risk Engine: kill-switch blokuje AUTOMAT (dzienny limit / seria strat) [M5] */
+      const rs = riskStatus(journal, { maxDailyLossR: prefs.maxDailyLossR, maxConsecLoss: prefs.maxConsecLoss });
       if(rs.blocked){
         Bus.show('🛑 Kill-switch: ' + rs.reason + ' — auto-trade wstrzymany');
       } else {
@@ -1041,8 +1048,14 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 </div>
               );
             })()}
-            <button className="chip sel mono" style={{width:'100%', justifyContent:'center', padding:'12px', fontSize:14}}
+            {riskState.blocked && (
+              <div className="mono" style={{fontSize:11, color:'var(--down)', marginBottom:6}}>⛔ Stop dnia: {riskState.reason} — nowe pozycje zablokowane (zarządzanie otwartymi działa).</div>
+            )}
+            <button className="chip sel mono" disabled={riskState.blocked}
+              title={riskState.blocked ? ('Stop dnia: ' + riskState.reason) : ''}
+              style={{width:'100%', justifyContent:'center', padding:'12px', fontSize:14, opacity: riskState.blocked ? 0.5 : 1, cursor: riskState.blocked ? 'not-allowed' : 'pointer'}}
               onClick={() => {
+                if(riskState.blocked){ Bus.show('⛔ Stop dnia: ' + riskState.reason); return; }
                 const sl = parseFloat(ticket.sl), t1 = parseFloat(ticket.tp1), t2 = parseFloat(ticket.tp2);
                 if(!isFinite(sl) || !isFinite(t1)){ Bus.show('Podaj poprawne SL i TP1'); return; }
                 const d = ticket.dir;
@@ -1053,7 +1066,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 addJournal(makePaper(d, ticket.entry, sl, t1, isFinite(t2) ? t2 : null, 'manual', null));
                 Bus.show('▶ Pozycja paper otwarta @ ' + fmtPrice(ticket.entry));
                 setTicket(null);
-              }}>Otwórz pozycję (paper)</button>
+              }}>{riskState.blocked ? '⛔ Otwieranie zablokowane (stop dnia)' : 'Otwórz pozycję (paper)'}</button>
           </div>
         </div>
       )}

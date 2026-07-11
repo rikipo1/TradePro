@@ -5,6 +5,7 @@ import { Bus } from '../core/bus.js';
 import { CAP_MAP, capEnabled, capitalTick } from '../data/capital.js';
 import { fetchQuotes } from '../data/feed.js';
 import { paperFloating } from '../data/paper.js';
+import { riskStatus } from '../signals/riskEngine.js';
 import { fmtPrice, pad2 } from '../utils/format.js';
 
 export function fmtDT(ts){
@@ -17,7 +18,10 @@ export const RESULT_DEF = [
   ['be',  'BE',   0,   'var(--dim)'],
   ['sl',  'SL',  -1,   'var(--down)'],
 ];
-export function JournalScreen({ journal, setJournal }){
+export function JournalScreen({ journal, setJournal, prefs }){
+  /* [M5] badge stanu ryzyka konta: dzienne R, seria strat, kill-switch */
+  const risk = riskStatus(journal, { maxDailyLossR: (prefs && prefs.maxDailyLossR) != null ? prefs.maxDailyLossR : 3,
+    maxConsecLoss: (prefs && prefs.maxConsecLoss) != null ? prefs.maxConsecLoss : 4 });
   const [edit, setEdit] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [pick, setPick] = useState(null);
@@ -119,6 +123,15 @@ export function JournalScreen({ journal, setJournal }){
           <Ic d={edit ? IC.check : IC.edit} size={18} />
         </button>
         <button className="iconbtn accent" onClick={() => setShowAdd(true)}><Ic d={IC.plus} size={19} /></button>
+      </div>
+
+      {/* [M5] badge ryzyka konta */}
+      <div className="card" style={{marginTop:2, borderColor: risk.blocked ? 'var(--down)' : undefined, background: risk.blocked ? 'rgba(255,107,94,.08)' : undefined}}>
+        <div className="kv"><b>{risk.blocked ? '⛔ Stop dnia AKTYWNY' : '🛡 Ryzyko konta'}</b>
+          <span className="mono" style={{color: risk.blocked ? 'var(--down)' : 'var(--dim)'}}>
+            dziś {risk.dailyR >= 0 ? '+' : ''}{risk.dailyR}R · seria {risk.consecLosses}
+          </span></div>
+        {risk.blocked && <div className="mono" style={{fontSize:11, color:'var(--down)'}}>{risk.reason} — nowe wejścia zablokowane (wyjścia działają)</div>}
       </div>
 
       <div className="card" style={{marginTop:2}}>
