@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { aiPrompt, buildAiContext, callClaude, callGemini, tolerantJson } from '../ai/index.js';
 import { backtestEngine, walkForwardKFold } from '../backtest/engine.js';
 import { riskStatus } from '../signals/riskEngine.js';
-import { Store, modelKey } from '../core/store.js';
+import { Store, modelKey, mergeSamples } from '../core/store.js';
 import { ChartCanvas } from '../components/ChartCanvas.jsx';
 import { EquityLine } from '../components/EquityLine.jsx';
 import { IC, Ic } from '../components/icons.jsx';
@@ -1109,9 +1109,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       const nowTs = candlesSafe.length ? candlesSafe[candlesSafe.length-1].t : Date.now();
                       const fresh = wf.samples.map(s => ({ x:s.x, y:s.y, i0:s.i0, i1:s.i1,
                         ts: (candlesSafe[s.i0] && candlesSafe[s.i0].t) || nowTs, sym:item.sym, tf:tf.id }));
-                      const seen = new Set(prior.map(s => s.ts + '|' + s.i0));
-                      const merged = prior.concat(fresh.filter(s => !seen.has(s.ts + '|' + s.i0)));
-                      Store.set(bufKey, merged.slice(-2000));
+                      Store.set(bufKey, mergeSamples(prior, fresh, 2000));
                       setWv(v => v + 1);
                       const a = wf.agg;
                       Bus.show('🧠 OOS k=' + wf.K + ' · avgR med ' + a.avgR.med + ' (IQR ' + a.avgR.p25 + '–' + a.avgR.p75 + ')'

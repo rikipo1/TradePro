@@ -30,6 +30,14 @@ export function modelKey(kind, sym, tfId){
   return `rt_${kind}_${sym}_${tfId}`;
 }
 
+/* [C3] scalanie bufora próbek: prior + świeże, deduplikacja po ts+i0,
+   cap FIFO (najstarsze wypadają). Pozwala próbie rosnąć między sesjami. */
+export function mergeSamples(prior, fresh, cap = 2000){
+  const seen = new Set((prior || []).map(s => s.ts + '|' + s.i0));
+  const add = (fresh || []).filter(s => !seen.has(s.ts + '|' + s.i0));
+  return (prior || []).concat(add).slice(-cap);
+}
+
 const LEGACY_MODEL_KEYS = ['rt_model_weights', 'rt_model_calib', 'rt_knn_history', 'rt_model_meta'];
 
 /* [C1] MIGRACJA v2: starych GLOBALNYCH kluczy modelu NIE da się przypisać do
