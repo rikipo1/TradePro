@@ -124,45 +124,134 @@ export function statsOf(T){
   };
 }
 
-/* WALK-FORWARD: trenuj wagi na pierwszych 60% danych, testuj OUT-OF-SAMPLE na
-   ostatnich 40% z wyuczonymi wagami.
-   K1 (EMBARGO): transakcja otwarta tuż przed splitem rozstrzyga się PO splicie
-   — jej etykieta niesie informację z okresu testowego. Do treningu bierzemy
-   więc wyłącznie próbki ZAMKNIĘTE przed splitem (i1 < split). Zero przecieku.
-   K4: na predykcjach treningowych fitujemy kalibrację isotonic (gdy ≥150
-   próbek), a na OOS liczymy Brier — jedyną uczciwą miarę jakości P.        */
-export function walkForward(candles, ind, emaData, hasVol, sym, minScore, smcCfg, tfId){
+/* --- statystyki agregujące k-fold: mediana + IQR (25/75 percentyl) --- */
+export function percentile(arr, p){
+  if(!arr || !arr.length) return null;
+  const s = arr.slice().sort((a,b)=>a-b);
+  const idx = (s.length - 1) * p;
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if(lo === hi) return s[lo];
+  return s[lo] + (s[hi] - s[lo]) * (idx - lo);
+}
+/* [C2] EMBARGO + PURGE: z puli próbek zostaw te ZAMKNIĘTE przed startem testu
+   (i1 < testStart) i NIE nachodzące oknem [i0,i1] na okno testowe [testStart,testEnd]. */
+export function purgeSamples(samples, testStart, testEnd){
+  return (samples || []).filter(s => {
+    const i1 = s.i1 != null ? s.i1 : s.i0;
+    const embargoOk = i1 < testStart;
+    const overlaps = s.i0 <= testEnd && i1 >= testStart;
+    return embargoOk && !overlaps;
+  });
+}
+
+export function medIqr(arr){
+  const a = (arr || []).filter(v => v != null && !Number.isNaN(v));
+  if(!a.length) return { med:null, p25:null, p75:null, n:0 };
+  return { med:+percentile(a,0.5).toFixed(3), p25:+percentile(a,0.25).toFixed(3), p75:+percentile(a,0.75).toFixed(3), n:a.length };
+}
+
+/* [C2] K-FOLD PURGED WALK-FORWARD.
+   Pojedynczy split 60/40 dawał JEDNĄ próbkę OOS — brak wariancji, overfitting
+   maskowany jako „OOS Brier". Tutaj K przesuwanych okien:
+     dziel oś czasu na K+1 bloków; dla foldu k trenuj na blokach [0..k]
+     (indeksy < startTestu), testuj na bloku k+1.
+   EMBARGO (López de Prado): do treningu tylko próbki ZAMKNIĘTE przed startem
+   testu (i1 < testStart). PURGE: dodatkowo wyrzucamy próbki, których okno
+   [i0,i1] NACHODZI na okno testowe [testStart, testEnd].
+   Agregacja: mediana + IQR (avgR, pf, winRate, brier) i łączny n_oos.
+   reliable = (Σn_oos ≥ 100) AND (mediana avgR > 0) AND (75-pct brier < 0.25).
+   Wagi PRODUKCYJNE trenujemy osobno na CAŁYCH danych (opcjonalnie + bufor
+   priorSamples), ale RAPORTUJEMY wyłącznie metryki k-fold OOS.               */
+export function walkForwardKFold(candles, ind, emaData, hasVol, sym, minScore, smcCfg, tfId, opts = {}){
+  const K = opts.K || 5;
   const n = candles.length;
   if(n < 250) return { ok:false, reason:'za mało danych (min 250 świec)' };
-  const split = Math.floor(n * 0.6);
+
+  // jeden bazowy przebieg (wagi domyślne) → pula wszystkich próbek {x,y,i0,i1}
   const base = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { tfId });
-  const trainSamples = base.samples.filter(s => (s.i1 != null ? s.i1 : s.i0) < split); // embargo
-  const tr = trainLogistic(trainSamples, { epochs: 500 });
-  if(!tr.trained) return { ok:false, reason: tr.reason, weights: tr.weights };
+  const allSamples = base.samples;
+  const bs = Math.floor(n / (K + 1));
+  if(bs < 20) return { ok:false, reason:'za mało danych na K+1 bloków' };
 
-  /* kalibracja: przelicz backtest z wyuczonymi wagami, weź predykcje z części
-     treningowej (zamknięte przed splitem) i dopasuj isotonic */
-  const withW = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, tfId });
-  const calPairs = withW.trades
-    .filter(t => t.i1 < split && (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
-    .map(t => ({ p: t.prob, y: t.out === 'TP1' ? 1 : 0 }));
-  const calib = fitIsotonic(calPairs, 150); // null gdy < 150 — nie kalibrujemy szumem
+  const folds = [];
+  for(let k = 0; k < K; k++){
+    const testStart = (k + 1) * bs;
+    const testEnd = (k === K - 1) ? n : (k + 2) * bs;
+    const trainSamples = purgeSamples(allSamples, testStart, testEnd); // EMBARGO + PURGE
+    if(trainSamples.length < 30){ folds.push({ k, skipped:true, reason:'trainN<30', n_oos:0 }); continue; }
+    const tr = trainLogistic(trainSamples, { epochs: 400 });
+    if(!tr.trained){ folds.push({ k, skipped:true, reason: tr.reason, n_oos:0 }); continue; }
 
-  /* finalny przebieg: wagi + kalibracja (jeśli jest) — OOS liczony z tego */
-  const finalRun = calib
-    ? backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, calib, tfId })
-    : withW;
-  const oosTrades = finalRun.trades.filter(t => t.i0 >= split);
-  const isTrades  = finalRun.trades.filter(t => t.i1 < split);
-  const oosPairs = oosTrades
-    .filter(t => (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
-    .map(t => ({ p: t.prob, y: t.out === 'TP1' ? 1 : 0 }));
+    // kalibracja z predykcji treningowych (zamknięte przed testStart)
+    const withW = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, tfId });
+    const calPairs = withW.trades
+      .filter(t => t.i1 < testStart && (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
+      .map(t => ({ p: t.prob, y: t.out === 'TP1' ? 1 : 0 }));
+    const calib = fitIsotonic(calPairs, 150);
+    const finalRun = calib
+      ? backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, calib, tfId })
+      : withW;
+    const oosTrades = finalRun.trades.filter(t => t.i0 >= testStart && t.i0 < testEnd);
+    const oosPairs = oosTrades
+      .filter(t => (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
+      .map(t => ({ p: t.prob, y: t.out === 'TP1' ? 1 : 0 }));
+    const st = statsOf(oosTrades);
+    folds.push({ k, skipped:false, testStart, testEnd,
+      n_oos: oosTrades.length, avgR: st.avgR || 0, pf: st.pf || 0, winRate: st.winRate || 0,
+      brier: brierScore(oosPairs) });
+  }
+
+  const used = folds.filter(f => !f.skipped && f.n_oos > 0);
+  const totalNoos = used.reduce((a, f) => a + f.n_oos, 0);
+  const agg = {
+    avgR: medIqr(used.map(f => f.avgR)),
+    pf: medIqr(used.map(f => f.pf)),
+    winRate: medIqr(used.map(f => f.winRate)),
+    brier: medIqr(used.filter(f => f.brier != null).map(f => f.brier)),
+  };
+  const reliable = totalNoos >= 100
+    && agg.avgR.med != null && agg.avgR.med > 0
+    && agg.brier.p75 != null && agg.brier.p75 < 0.25;
+
+  /* --- WAGI PRODUKCYJNE: trening na CAŁYCH próbkach (embargo względem „teraz"
+     = ostatnia świeca; backtest domyka/timeoutuje wszystkie pozycje, więc próbki
+     są już zamknięte) + opcjonalny bufor między-sesyjny (C3). NIE mieszać z
+     metrykami walidacji — te pochodzą wyłącznie z k-fold OOS powyżej. --- */
+  const prodPool = (opts.priorSamples && opts.priorSamples.length)
+    ? allSamples.concat(opts.priorSamples)
+    : allSamples;
+  const prodTr = trainLogistic(prodPool, { epochs: 500 });
+  let prodCalib = null, prodInSample = { n:0 };
+  if(prodTr.trained){
+    const prodRun = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: prodTr.weights, tfId });
+    const allPairs = prodRun.trades
+      .filter(t => (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
+      .map(t => ({ p: t.prob, y: t.out === 'TP1' ? 1 : 0 }));
+    prodCalib = fitIsotonic(allPairs, 150);
+    prodInSample = statsOf(prodRun.trades);
+  }
 
   return {
-    ok:true, split, weights: tr.weights, calib, training: tr,
-    inSample: statsOf(isTrades), outSample: statsOf(oosTrades), baseline: base.stats,
-    oosBrier: brierScore(oosPairs),      // < 0.25 = lepiej niż moneta
-    reliable: tr.reliable && oosTrades.length >= 30,
-    samples: trainSamples.map(s => ({ x: s.x, y: s.y })), // historia dla kNN (część treningowa, z embargo)
+    ok:true, K, folds, used: used.length, agg, totalNoos, reliable,
+    split: bs, baseline: base.stats, inSample: prodInSample,
+    weights: prodTr.trained ? prodTr.weights : prodTr.weights, training: prodTr,
+    calib: reliable ? prodCalib : null,   // [C3] kalibrację zapisujemy tylko dla wiarygodnego modelu
+    samples: allSamples.map(s => ({ x: s.x, y: s.y, i0: s.i0, i1: s.i1 })), // historia dla kNN / bufora
+  };
+}
+
+/* @deprecated — pojedynczy split 60/40 zastąpiony przez walkForwardKFold.
+   Zachowany dla zgodności API: woła k-fold z K=1 i mapuje na starą strukturę.  */
+export function walkForward(candles, ind, emaData, hasVol, sym, minScore, smcCfg, tfId){
+  const kf = walkForwardKFold(candles, ind, emaData, hasVol, sym, minScore, smcCfg, tfId, { K: 1 });
+  if(!kf.ok) return kf;
+  const f = kf.folds.find(x => !x.skipped) || {};
+  return {
+    ok:true, split: kf.split, weights: kf.weights, calib: kf.calib, training: kf.training,
+    inSample: kf.inSample, baseline: kf.baseline,
+    outSample: { n: f.n_oos || 0, pf: f.pf || 0, avgR: f.avgR || 0, winRate: f.winRate || 0 },
+    oosBrier: f.brier != null ? f.brier : null,
+    reliable: kf.reliable,
+    samples: kf.samples.map(s => ({ x: s.x, y: s.y })),
   };
 }

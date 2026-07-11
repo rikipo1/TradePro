@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { aiPrompt, buildAiContext, callClaude, callGemini, tolerantJson } from '../ai/index.js';
-import { backtestEngine, walkForward } from '../backtest/engine.js';
+import { backtestEngine, walkForwardKFold } from '../backtest/engine.js';
 import { riskStatus } from '../signals/riskEngine.js';
 import { Store, modelKey } from '../core/store.js';
 import { ChartCanvas } from '../components/ChartCanvas.jsx';
@@ -1092,26 +1092,44 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   if(bt.busy || !ind || candlesSafe.length < 250){ if(!bt.busy) Bus.show('Do treningu wag trzeba ≥250 świec (zmień interwał na większy zakres)'); return; }
                   setBt({ busy:true, res:null });
                   setTimeout(() => {
-                    const wf = walkForward(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, tf.id);
+                    /* [C3] bufor między-sesyjny: łączymy świeżo policzone próbki
+                       ze zbuforowanymi (dedup po ts+i0), by próba rosła w czasie. */
+                    const bufKey = 'rt_samples_' + item.sym + '_' + tf.id;
+                    const prior = Store.get(bufKey, []);
+                    const wf = walkForwardKFold(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, tf.id, { K:5, priorSamples: prior });
                     if(wf && wf.ok){
-                      Store.set('rt_model_weights', wf.weights);
-                      Store.set('rt_model_calib', wf.calib || null);
-                      Store.set('rt_knn_history', wf.samples && wf.samples.length >= 40 ? wf.samples : null);
-                      Store.set('rt_model_meta', { n: wf.training.n, reliable: !!wf.reliable, oosBrier: wf.oosBrier, at: Date.now() });
+                      const mk = (kind) => modelKey(kind, item.sym, tf.id);
+                      /* [C1] zapis PER instrument×TF. [C3] kalibracja/kNN tylko gdy reliable. */
+                      Store.set(mk('weights'), wf.weights);
+                      Store.set(mk('calib'), wf.reliable ? (wf.calib || null) : null);
+                      Store.set(mk('knn'), (wf.reliable && wf.samples && wf.samples.length >= 40) ? wf.samples : null);
+                      Store.set(mk('meta'), { n: wf.training.n, reliable: !!wf.reliable, totalNoos: wf.totalNoos,
+                        avgRmed: wf.agg.avgR.med, brierP75: wf.agg.brier.p75, sym:item.sym, tf:tf.id, at: Date.now() });
+                      /* [C3] dopisz nowe próbki do bufora (cap 2000, FIFO, dedup ts+i0) */
+                      const nowTs = candlesSafe.length ? candlesSafe[candlesSafe.length-1].t : Date.now();
+                      const fresh = wf.samples.map(s => ({ x:s.x, y:s.y, i0:s.i0, i1:s.i1,
+                        ts: (candlesSafe[s.i0] && candlesSafe[s.i0].t) || nowTs, sym:item.sym, tf:tf.id }));
+                      const seen = new Set(prior.map(s => s.ts + '|' + s.i0));
+                      const merged = prior.concat(fresh.filter(s => !seen.has(s.ts + '|' + s.i0)));
+                      Store.set(bufKey, merged.slice(-2000));
                       setWv(v => v + 1);
-                      Bus.show('🧠 OOS: ' + (wf.outSample.n||0) + ' tr · PF ' + (wf.outSample.pf||0) + ' · ' + (wf.outSample.avgR||0) + 'R'
-                        + (wf.oosBrier != null ? ' · Brier ' + wf.oosBrier : '')
-                        + (wf.reliable ? '' : ' · ⚠ MAŁA PRÓBA (n=' + wf.training.n + ') — nie ufaj tym wagom'));
+                      const a = wf.agg;
+                      Bus.show('🧠 OOS k=' + wf.K + ' · avgR med ' + a.avgR.med + ' (IQR ' + a.avgR.p25 + '–' + a.avgR.p75 + ')'
+                        + ' · Brier med ' + (a.brier.med != null ? a.brier.med : '—') + ' · n=' + wf.totalNoos
+                        + ' · ' + (wf.reliable ? '✓ wiarygodne' : '⚠ NIEwiarygodne (wagi zapisane, kalibracja/kNN WYŁ.)'));
                     } else {
                       Bus.show('Trening nieudany: ' + (wf ? wf.reason : 'brak danych'));
                     }
+                    const rel = !!(wf && wf.reliable);
                     const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc,
-                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
+                      { weights: rel ? Store.get(modelKey('weights', item.sym, tf.id), null) : null,
+                        calib: rel ? Store.get(modelKey('calib', item.sym, tf.id), null) : null,
+                        knn: rel ? Store.get(modelKey('knn', item.sym, tf.id), null) : null, tfId: tf.id });
                     r.wf = wf;
                     setBt({ busy:false, res:r });
                   }, 40);
                 }}>
-                🧠 Trenuj wagi z backtestu (walk-forward)
+                🧠 Trenuj wagi (k-fold walk-forward)
               </button>
               {Store.get(modelKey('weights', item.sym, tf.id), null) && (() => {
                 const meta = Store.get(modelKey('meta', item.sym, tf.id), null);
@@ -1162,21 +1180,22 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       ))}
                     </React.Fragment>
                   )}
-                  {bt.res.wf && bt.res.wf.ok && (
+                  {bt.res.wf && bt.res.wf.ok && (() => { const a = bt.res.wf.agg; return (
                     <div style={{marginTop:12, background:'var(--bg)', border:'1px solid rgba(79,216,255,.3)', borderRadius:12, padding:'10px 12px'}}>
-                      <div className="section-label" style={{padding:'0 0 6px', color:'var(--cyan)'}}>Walk-forward (uczenie wag)</div>
-                      <div className="kv"><b>In-sample (trening 60%)</b><span className="mono">{bt.res.wf.inSample.n} tr · PF {bt.res.wf.inSample.pf} · {bt.res.wf.inSample.avgR}R</span></div>
-                      <div className="kv"><b>Out-of-sample (test 40%)</b><span className="mono" style={{color: (bt.res.wf.outSample.avgR||0) > 0 ? 'var(--up)' : 'var(--down)', fontWeight:700}}>{bt.res.wf.outSample.n||0} tr · PF {bt.res.wf.outSample.pf||0} · {bt.res.wf.outSample.avgR||0}R</span></div>
-                      <div className="kv"><b>Baseline (wagi domyślne)</b><span className="mono">{bt.res.wf.baseline ? bt.res.wf.baseline.n : '—'} tr · {bt.res.wf.baseline ? bt.res.wf.baseline.avgR : '—'}R</span></div>
-                      {bt.res.wf.oosBrier != null && (
-                        <div className="kv"><b>Brier OOS (kalibracja P)</b><span className="mono" style={{color: bt.res.wf.oosBrier < 0.24 ? 'var(--up)' : 'var(--ema9)'}}>{bt.res.wf.oosBrier}<span style={{color:'var(--dim2)', fontWeight:500}}> (0.25 = moneta)</span></span></div>
-                      )}
-                      {!bt.res.wf.reliable && (
-                        <div style={{fontSize:10.5, color:'var(--ema9)', marginTop:5, lineHeight:1.55}}>⚠ Próba treningowa n={bt.res.wf.training.n} &lt; 150 lub OOS &lt; 30 transakcji — wynik statystycznie SŁABY. Traktuj jako eksperyment, nie dowód.</div>
-                      )}
-                      <div style={{fontSize:10.5, color:'var(--dim2)', marginTop:5, lineHeight:1.55}}>OOS to jedyny uczciwy dowód przewagi. Jeśli OOS PF ≤ 1 lub avgR ≤ 0 — model NIE ma edge na tym instrumencie; nie ufaj wyuczonym wagom. Trening z embargo (bez przecieku etykiet przez granicę splitu), HTF liczony identycznie jak live.</div>
+                      {/* [C2] raport k-fold: mediana + IQR zamiast pojedynczego splitu */}
+                      <div className="section-label" style={{padding:'0 0 6px', color:'var(--cyan)'}}>Walk-forward k-fold (K={bt.res.wf.K}, purged)</div>
+                      <div className="kv"><b>OOS avgR</b><span className="mono" style={{color: (a.avgR.med||0) > 0 ? 'var(--up)' : 'var(--down)', fontWeight:700}}>med {a.avgR.med} · IQR {a.avgR.p25}–{a.avgR.p75}</span></div>
+                      <div className="kv"><b>OOS PF</b><span className="mono">med {a.pf.med} · IQR {a.pf.p25}–{a.pf.p75}</span></div>
+                      <div className="kv"><b>OOS win%</b><span className="mono">med {a.winRate.med}% · IQR {a.winRate.p25}–{a.winRate.p75}</span></div>
+                      <div className="kv"><b>OOS Brier</b><span className="mono" style={{color: (a.brier.p75!=null && a.brier.p75 < 0.25) ? 'var(--up)' : 'var(--ema9)'}}>med {a.brier.med != null ? a.brier.med : '—'} · 75-pct {a.brier.p75 != null ? a.brier.p75 : '—'} <span style={{color:'var(--dim2)', fontWeight:500}}>(0.25 = moneta)</span></span></div>
+                      <div className="kv"><b>Łączny n_oos</b><span className="mono" style={{color: bt.res.wf.totalNoos >= 100 ? 'var(--up)' : 'var(--ema9)'}}>{bt.res.wf.totalNoos}</span></div>
+                      <div className="kv"><b>Baseline (domyślne)</b><span className="mono">{bt.res.wf.baseline ? bt.res.wf.baseline.n : '—'} tr · {bt.res.wf.baseline ? bt.res.wf.baseline.avgR : '—'}R</span></div>
+                      <div style={{marginTop:6, fontSize:12, fontWeight:800, color: bt.res.wf.reliable ? 'var(--up)' : 'var(--down)'}}>
+                        {bt.res.wf.reliable ? '✓ WIARYGODNE — wagi, kalibracja i kNN aktywne' : '⚠ NIEWIARYGODNE — wagi zapisane, ale kalibracja i kNN WYŁĄCZONE (tor decyzyjny używa DEFAULT_WEIGHTS)'}
+                      </div>
+                      <div style={{fontSize:10.5, color:'var(--dim2)', marginTop:5, lineHeight:1.55}}>Kryterium wiarygodności: łączny n_oos ≥ 100 ORAZ mediana avgR &gt; 0 ORAZ 75-pct Brier &lt; 0.25. K przesuwanych okien z embargo + purging (López de Prado): próbki nachodzące na okno testowe są usuwane z treningu. Metryki liczone WYŁĄCZNIE na OOS; wagi produkcyjne trenowane osobno na całości.</div>
                     </div>
-                  )}
+                  ); })()}
                   <div style={{marginTop:12, fontSize:11, color:'var(--dim2)', lineHeight:1.65}}>
                     Metodologia: wejście po close świecy sygnału · <b style={{color:'var(--dim)'}}>dynamiczne zarządzanie</b>:
                     po +1R stop przesuwany na wejście (BE), na TP1 realizacja 50% pozycji, reszta („runner")
