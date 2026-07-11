@@ -11,7 +11,7 @@ import { Net } from '../core/net.js';
 import { CAP_MAP, capEnabled, capResolveEpic, capWsStart, capWsStop, capitalTick } from '../data/capital.js';
 import { TF_SEC, getChart, htfTrend } from '../data/feed.js';
 import { TFS } from '../data/yahoo.js';
-import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
+import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, hasVolume, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
 import { detectPatterns } from '../patterns/index.js';
 import { computeSignal } from '../signals/engine.js';
 import { displacement } from '../smc/index.js';
@@ -170,7 +170,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     }
     return out;
   }, [closes]);
-  const hasVol = useMemo(() => candlesSafe.some(c => c.v > 0), [candlesSafe]);
+  const hasVol = useMemo(() => hasVolume(candlesSafe), [candlesSafe]); // [M3] ≥60% świec + wariancja
 
   /* Faza 2: pakiet wskaźników */
   const ind = useMemo(() => {

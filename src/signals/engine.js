@@ -1,9 +1,9 @@
 import { spreadPx } from '../constants/instruments.js';
 import { getChart, htfTrend } from '../data/feed.js';
-import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
+import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, hasVolume, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
 import { detectPatterns, zigzag } from '../patterns/index.js';
 import { displacement, relativeVolume, smcAnalyze } from '../smc/index.js';
-import { sessionInfo } from '../utils/sessions.js';
+import { sessionInfo, macroWindow } from '../utils/sessions.js';
 import { buildPullbackPlan } from './pullback.js';
 import { buildOpportunities } from './opportunities.js';
 import { classifyRegime } from './regime.js';
@@ -454,23 +454,13 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   out.liquidityLevels = { pdh: liq.pdh, pdl: liq.pdl, todayHigh: liq.todayHigh, todayLow: liq.todayLow };
   if(vp) out.vp = vp;
 
-  /* okna makro / otwarcia sesji (czas lokalny) — INFORMACYJNIE (bez blokady wejść) */
-  const dt = new Date();
-  const hm = dt.getHours()*60 + dt.getMinutes();
-  const wins = [
-    [9*60,        9*60+15,  'otwarcie DAX 09:00'],
-    [14*60+22,    14*60+42, 'publikacje USA 14:30'],
-    [15*60+25,    15*60+45, 'otwarcie Wall Street 15:30'],
-    [15*60+52,    16*60+12, 'dane USA 16:00'],
-    [19*60+52,    20*60+15, 'FOMC / minutes 20:00'],
-  ];
-  for(let q=0;q<wins.length;q++){
-    if(hm >= wins[q][0] && hm <= wins[q][1]){
-      out.macroWindow = wins[q][2];
-      if(atIdx == null){
-        warns.push('Okno makro: ' + wins[q][2] + ' — podwyższona zmienność (wejścia NIE są blokowane, uważaj na szarpnięcia)');
-      }
-      break;
+  /* [M1] okna makro liczone z CZASU ŚWIECY/UTC (spójnie live i backtest) — INFORMACYJNIE */
+  const macroDt = isLive ? new Date() : new Date(c.t*1000);
+  const mw = macroWindow(macroDt);
+  if(mw){
+    out.macroWindow = mw;
+    if(atIdx == null){
+      warns.push('Okno makro: ' + mw + ' — podwyższona zmienność (wejścia NIE są blokowane, uważaj na szarpnięcia)');
     }
   }
 
@@ -534,7 +524,7 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
 export function indicatorsFor(candles, tfId){
   if(!candles || candles.length < 5) return null;
   const closes = candles.map(c => c.c);
-  const hasVol = candles.some(c => c.v > 0);
+  const hasVol = hasVolume(candles); // [M3] ≥60% świec z wolumenem + dodatnia wariancja
   const atr = atrSeries(candles, 14);
   let atrLast = null;
   for(let i=atr.length-1;i>=0;i--){ if(atr[i] != null){ atrLast = atr[i]; break; } }
