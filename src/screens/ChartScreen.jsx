@@ -421,12 +421,27 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     Bus.show('⏳ LIMIT ' + (dir > 0 ? 'LONG' : 'SHORT') + ' @ ' + fmtPrice(entry) + ' — czeka na dojście ceny (ważne 12 h)');
   };
 
-  const openTicket = (dir) => {
+  const openTicket = async (dir) => {
     if(!candlesSafe.length){
       Bus.show('Poczekaj na dane');
       return;
     }
-    const px = data.price != null ? data.price : candlesSafe[candlesSafe.length-1].c;
+    /* WEJŚCIE PO AKTUALNEJ CENIE: bez trybu AUTO `data.price` zostaje na zamknięciu
+       ostatniej świecy (cena „zaniżona"/nieaktualna). Przy każdym kliknięciu KUP/
+       SPRZEDAJ pobieramy ŚWIEŻY tick z Capital.com (jeśli LIVE dostępny), żeby
+       pozycja była otwierana po realnej bieżącej cenie, a nie po świecy. */
+    let px = data.price != null ? data.price : candlesSafe[candlesSafe.length-1].c;
+    let liveEntry = false;
+    if(capEnabled() && CAP_MAP[item.sym]){
+      try{
+        /* wyścig z krótkim timeoutem — modal nie może zawisnąć, gdy Capital wolno odpowiada */
+        const t = await Promise.race([
+          capitalTick(item.sym),
+          new Promise(r => setTimeout(() => r(null), 2500)),
+        ]);
+        if(t && t.px != null){ px = t.px; liveEntry = true; }
+      }catch(e){}
+    }
     let a = null;
     if(ind && ind.atr){
       for(let q=ind.atr.length-1;q>=0;q--){ if(ind.atr[q] != null){ a = ind.atr[q]; break; } }
@@ -440,7 +455,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       tp1 = dir === 1 ? px + a*1.65 : px - a*1.65;
       tp2 = dir === 1 ? px + a*2.75 : px - a*2.75;
     }
-    setTicket({ dir, entry:px, sl:fmtPrice(sl), tp1:fmtPrice(tp1), tp2:fmtPrice(tp2) });
+    setTicket({ dir, entry:px, sl:fmtPrice(sl), tp1:fmtPrice(tp1), tp2:fmtPrice(tp2), live:liveEntry });
   };
 
   /* Faza 6: alert przy nowym sygnale (przy włączonym AUTO) */
@@ -1027,9 +1042,12 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
               <span className="mono" style={{color:'var(--dim)', fontSize:12}}>{item.sym} · paper</span>
               <span className="spacer" />
               <span className="mono" style={{fontSize:14, fontWeight:800}}>@ {fmtPrice(ticket.entry)}</span>
+              {ticket.live
+                ? <span className="mono" style={{fontSize:10, fontWeight:800, color:'var(--up)'}}>● LIVE</span>
+                : <span className="mono" style={{fontSize:10, color:'var(--ema9)'}}>feed ~15 min</span>}
             </div>
             <div style={{fontSize:11, color:'var(--dim2)', marginBottom:10, lineHeight:1.5}}>
-              Wirtualne zlecenie po cenie rynkowej — rozliczy się automatycznie po żywych notowaniach (SL / TP1 / TP2).
+              Wejście po {ticket.live ? 'AKTUALNEJ cenie LIVE (Capital.com)' : 'ostatniej cenie z darmowego feedu (opóźnienie ~15 min — włącz Capital LIVE w INFO dla realnej ceny)'} — rozliczy się automatycznie po żywych notowaniach (SL / TP1 / TP2).
             </div>
             {[['sl','Stop Loss'],['tp1','Take Profit 1'],['tp2','Take Profit 2']].map(([k, l]) => (
               <div key={k} style={{marginBottom:9}}>
