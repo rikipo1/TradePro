@@ -455,8 +455,37 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       tp1 = dir === 1 ? px + a*1.65 : px - a*1.65;
       tp2 = dir === 1 ? px + a*2.75 : px - a*2.75;
     }
+    /* [tryb AUTO] bez okna akceptacji: KUP/SPRZEDAJ od razu otwiera pozycję paper
+       z automatycznym SL/TP po AKTUALNEJ cenie. Kill-switch konta obowiązuje. */
+    if(prefs.quickTrade){
+      if(riskState.blocked){ Bus.show('⛔ Stop dnia: ' + riskState.reason + ' — nowe pozycje zablokowane'); return; }
+      if(journal.some(e => e.paper && (e.result === 'open' || e.result === 'pending') && e.sym === item.sym)){
+        Bus.show('Masz już otwartą/oczekującą pozycję na ' + item.sym); return;
+      }
+      addJournal(makePaper(dir, px, sl, tp1, tp2, 'manual', null));
+      Bus.show('▶ ' + (dir > 0 ? 'KUP' : 'SPRZEDAJ') + ' otwarte @ ' + fmtPrice(px) + (liveEntry ? ' · LIVE' : '') + ' (auto SL/TP)');
+      return;
+    }
     setTicket({ dir, entry:px, sl:fmtPrice(sl), tp1:fmtPrice(tp1), tp2:fmtPrice(tp2), live:liveEntry });
   };
+
+  /* [ticket] ENTRY ZABLOKOWANE i odczytywane z wykresu NA BIEŻĄCO: pole wejścia
+     nie jest edytowalne, a pokazywana cena śledzi żywy wykres. */
+  useEffect(() => {
+    if(ticket && data.price != null){
+      setTicket(t => (t && t.entry !== data.price) ? { ...t, entry: data.price, live: !!data.live } : t);
+    }
+  }, [data.price]);
+  /* dodatkowy poll żywej ceny, gdy tryb AUTO jest wyłączony (Capital LIVE) */
+  useEffect(() => {
+    if(!ticket) return;
+    if(!(capEnabled() && CAP_MAP[item.sym])) return;
+    let alive = true;
+    const h = setInterval(async () => {
+      try{ const tk = await capitalTick(item.sym); if(alive && tk && tk.px != null) setTicket(t => t ? { ...t, entry: tk.px, live: true } : t); }catch(e){}
+    }, 2000);
+    return () => { alive = false; clearInterval(h); };
+  }, [!!ticket, item.sym]);
 
   /* Faza 6: alert przy nowym sygnale (przy włączonym AUTO) */
   useEffect(() => {
@@ -693,11 +722,22 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       })()}
 
       {candlesSafe.length > 0 && (
-        <div style={{display:'flex', gap:8, margin:'4px 16px 2px'}}>
-          <button className="chip mono" style={{flex:1, justifyContent:'center', padding:'10px 0', fontWeight:800, color:'var(--up)', borderColor:'rgba(47,214,174,.5)', background:'rgba(47,214,174,.08)'}}
-            onClick={() => openTicket(1)}>▲ KUP · paper</button>
-          <button className="chip mono" style={{flex:1, justifyContent:'center', padding:'10px 0', fontWeight:800, color:'var(--down)', borderColor:'rgba(255,107,94,.5)', background:'rgba(255,107,94,.08)'}}
-            onClick={() => openTicket(-1)}>▼ SPRZEDAJ · paper</button>
+        <div style={{margin:'4px 16px 2px'}}>
+          {/* przełącznik: szybkie wejście (bez akceptacji, auto SL/TP) ⟷ okno zlecenia */}
+          <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, marginBottom:6}}>
+            <span style={{fontSize:11, color:'var(--dim2)'}}>tryb wejścia:</span>
+            <button className={'chip mono' + (prefs.quickTrade ? ' sel' : '')}
+              onClick={() => setPrefs(p => { const nv = !p.quickTrade; Bus.show(nv ? '⚡ Szybkie wejście: KUP/SPRZEDAJ otwiera OD RAZU (auto SL/TP, bez akceptacji)' : '📝 Okno zlecenia: potwierdzasz i ustawiasz SL/TP'); return { ...p, quickTrade:nv }; })}
+              style={{padding:'4px 10px', fontSize:11, fontWeight:800, color: prefs.quickTrade ? 'var(--ema9)' : 'var(--dim)', borderColor: prefs.quickTrade ? 'rgba(255,201,77,.5)' : 'var(--border2)'}}>
+              {prefs.quickTrade ? '⚡ SZYBKIE (bez akceptacji)' : '📝 OKNO ZLECENIA'}
+            </button>
+          </div>
+          <div style={{display:'flex', gap:8}}>
+            <button className="chip mono" style={{flex:1, justifyContent:'center', padding:'10px 0', fontWeight:800, color:'var(--up)', borderColor:'rgba(47,214,174,.5)', background:'rgba(47,214,174,.08)'}}
+              onClick={() => openTicket(1)}>▲ KUP · paper</button>
+            <button className="chip mono" style={{flex:1, justifyContent:'center', padding:'10px 0', fontWeight:800, color:'var(--down)', borderColor:'rgba(255,107,94,.5)', background:'rgba(255,107,94,.08)'}}
+              onClick={() => openTicket(-1)}>▼ SPRZEDAJ · paper</button>
+          </div>
         </div>
       )}
 
@@ -1043,11 +1083,13 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
               <span className="spacer" />
               <span className="mono" style={{fontSize:14, fontWeight:800}}>@ {fmtPrice(ticket.entry)}</span>
               {ticket.live
-                ? <span className="mono" style={{fontSize:10, fontWeight:800, color:'var(--up)'}}>● LIVE</span>
-                : <span className="mono" style={{fontSize:10, color:'var(--ema9)'}}>feed ~15 min</span>}
+                ? <span className="mono" style={{fontSize:10, fontWeight:800, color:'var(--up)'}}>● LIVE 🔒</span>
+                : <span className="mono" style={{fontSize:10, color:'var(--ema9)'}}>feed ~15 min 🔒</span>}
             </div>
             <div style={{fontSize:11, color:'var(--dim2)', marginBottom:10, lineHeight:1.5}}>
-              Wejście po {ticket.live ? 'AKTUALNEJ cenie LIVE (Capital.com)' : 'ostatniej cenie z darmowego feedu (opóźnienie ~15 min — włącz Capital LIVE w INFO dla realnej ceny)'} — rozliczy się automatycznie po żywych notowaniach (SL / TP1 / TP2).
+              Wejście <b style={{color:'var(--text)'}}>zablokowane</b> — cena czytana z wykresu na bieżąco
+              ({ticket.live ? 'LIVE Capital.com' : 'darmowy feed, opóźnienie ~15 min — włącz Capital LIVE w INFO'}).
+              Ustawiasz tylko SL / TP; rozliczenie automatyczne po żywych notowaniach.
             </div>
             {[['sl','Stop Loss'],['tp1','Take Profit 1'],['tp2','Take Profit 2']].map(([k, l]) => (
               <div key={k} style={{marginBottom:9}}>

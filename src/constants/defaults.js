@@ -19,4 +19,4 @@ export const DEFAULT_SMC = {
   rangeBonus: 15,   // ile dodać do progu w konsolidacji (ADX<18)
   minRR: 1.5,       // minimalny akceptowalny RR do najbliższej struktury
 };
-export const DEFAULT_PREFS = { tf:'M5', emaVis:{ 9:true, 20:true, 50:true, 200:false }, auto:false, alert:false, autoTrade:false, bgScan:false, onlyStrong:false, waitPullback:false, pbAlert:true, minScore:30, source:'auto', ind:{ form:true, boll:false, vwap:false, sr:true, panels:['RSI'] }, smc:{ ...DEFAULT_SMC }, maxDailyLossR:3, maxConsecLoss:4 };
+export const DEFAULT_PREFS = { tf:'M5', emaVis:{ 9:true, 20:true, 50:true, 200:false }, auto:false, alert:false, autoTrade:false, bgScan:false, onlyStrong:false, waitPullback:false, pbAlert:true, minScore:30, source:'auto', ind:{ form:true, boll:false, vwap:false, sr:true, panels:['RSI'] }, smc:{ ...DEFAULT_SMC }, maxDailyLossR:3, maxConsecLoss:4, quickTrade:false };
