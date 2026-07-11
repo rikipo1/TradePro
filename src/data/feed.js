@@ -2,7 +2,7 @@ import { Bus } from '../core/bus.js';
 import { fetchJson } from '../core/net.js';
 import { CAP_MAP, capEnabled, capWarned, capitalChart, setCapWarned } from './capital.js';
 import { stooqDaily } from './stooq.js';
-import { yahooChart } from './yahoo.js';
+import { yahooChart, yahooChartWindow } from './yahoo.js';
 import { atrSeries, emaOver } from '../indicators/index.js';
 import { zigzag } from '../patterns/index.js';
 import { marketStructure } from '../smc/index.js';
@@ -26,6 +26,19 @@ export async function fetchChart(symbol, tf){
     }
     throw e;
   }
+}
+
+/* Świece zakotwiczone na oknie [t0,t1] (sekundy) — dla mini-wykresu dziennika.
+   Preferujemy Yahoo (obsługuje period1/period2), by świeca wejścia była w kadrze.
+   Gdy okno jest poza retencją intraday Yahoo (stare transakcje) i zwróci pusto —
+   fallback do zwykłego fetchChart (ostatni zakres), z flagą approx=true. */
+export async function fetchChartWindow(symbol, tf, t0, t1){
+  try{
+    const r = await yahooChartWindow(symbol, tf.interval, t0, t1);
+    if(r && r.candles && r.candles.length >= 3) return { ...r, approx:false };
+  }catch(e){}
+  const r2 = await fetchChart(symbol, tf);
+  return { ...r2, approx:true };
 }
 
 export async function searchSymbols(qstr){

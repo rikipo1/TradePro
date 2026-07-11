@@ -8,6 +8,10 @@ import { fmtPrice } from '../utils/format.js';
 
 export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl, journal, setJournal }){
   const [capTest, setCapTest] = useState({ busy:false, msg:'', ok:null });
+  /* parametry strategii domyślnie ZABLOKOWANE (chroni przed przypadkowym misclickiem);
+     zmiana dopiero po kliknięciu „Edytuj". */
+  const [settingsLocked, setSettingsLocked] = useState(true);
+  const lockStyle = { pointerEvents: settingsLocked ? 'none' : 'auto', opacity: settingsLocked ? 0.5 : 1, transition:'opacity .15s' };
   const [backupMsg, setBackupMsg] = useState('');
   const [backupText, setBackupText] = useState('');
   const [pasteMode, setPasteMode] = useState(false);
@@ -56,7 +60,18 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
       </div>
 
       <div className="card" style={{borderColor:'rgba(79,216,255,.3)'}}>
-        <h3 style={{color:'var(--cyan)'}}>Alerty i skaner</h3>
+        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:4}}>
+          <h3 style={{color:'var(--cyan)', margin:0}}>Alerty i skaner</h3>
+          <button className={'chip mono' + (settingsLocked ? '' : ' sel')}
+            style={{padding:'4px 10px', fontSize:11, color: settingsLocked ? 'var(--dim)' : 'var(--up)', borderColor: settingsLocked ? 'var(--border2)' : 'rgba(47,214,174,.4)'}}
+            onClick={() => { setSettingsLocked(v => !v); Bus.show(settingsLocked ? '✏️ Edycja parametrów odblokowana' : '🔒 Parametry zablokowane'); }}>
+            {settingsLocked ? '✏️ Edytuj' : '🔒 Zablokuj'}
+          </button>
+        </div>
+        {settingsLocked && (
+          <div style={{fontSize:10.5, color:'var(--dim2)', marginBottom:8}}>Parametry zablokowane (ochrona przed przypadkową zmianą) — kliknij „Edytuj", by zmieniać.</div>
+        )}
+        <div style={lockStyle}>
         <div style={{display:'flex', gap:8, marginBottom:12, flexWrap:'wrap'}}>
           <button className={'chip mono' + (prefs.onlyStrong ? ' sel' : ' off')}
             style={prefs.onlyStrong ? {color:'var(--up)', borderColor:'rgba(47,214,174,.4)'} : null}
@@ -119,6 +134,7 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
               style={{width:'100%', marginTop:4, padding:'7px 9px', background:'var(--bg)', border:'1px solid var(--border2)', borderRadius:8, color:'var(--text)'}} className="mono" />
           </label>
         </div>
+        </div>{/* /lockStyle — koniec parametrów Alerty i skaner */}
         <div style={{fontSize:12.5, color:'var(--dim)', lineHeight:1.75, marginTop:10}}>
           <b style={{color:'var(--text)'}}>Skaner tła</b> przechodzi całą listę obserwowanych na wybranym
           interwale co ~45 s i alarmuje o nowych sygnałach nawet bez otwartego wykresu
@@ -148,8 +164,14 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
         <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:4}}>
           <h3 style={{margin:0}}>Strojenie SMC (progi silnika)</h3>
           <span className="spacer" style={{flex:1}} />
-          <button className="chip mono" style={{fontSize:11, padding:'5px 9px', color:'var(--accent)', borderColor:'rgba(255,138,117,.4)'}}
+          <button className={'chip mono' + (settingsLocked ? '' : ' sel')}
+            style={{padding:'4px 10px', fontSize:11, marginRight:6, color: settingsLocked ? 'var(--dim)' : 'var(--up)', borderColor: settingsLocked ? 'var(--border2)' : 'rgba(47,214,174,.4)'}}
+            onClick={() => { setSettingsLocked(v => !v); Bus.show(settingsLocked ? '✏️ Edycja parametrów odblokowana' : '🔒 Parametry zablokowane'); }}>
+            {settingsLocked ? '✏️ Edytuj' : '🔒 Zablokuj'}
+          </button>
+          <button className="chip mono" disabled={settingsLocked} style={{fontSize:11, padding:'5px 9px', color:'var(--accent)', borderColor:'rgba(255,138,117,.4)', opacity: settingsLocked ? 0.4 : 1, cursor: settingsLocked ? 'not-allowed' : 'pointer'}}
             onClick={() => {
+              if(settingsLocked) return;
               setPrefs(p => ({ ...p, smc:{ ...DEFAULT_SMC } }));
               Bus.show('↺ Progi SMC przywrócone do wartości domyślnych');
             }}>↺ Reset do domyślnych</button>
@@ -157,7 +179,9 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
         <div style={{fontSize:12, color:'var(--dim)', lineHeight:1.6, marginBottom:10}}>
           Domyślne wartości są rozsądnym startem — dostrój je własnym backtestem na realnych
           danych DAX/US100. Zmiany działają natychmiast na wykresie, w skanerze i w backteście.
+          {settingsLocked && <span style={{color:'var(--ema9)'}}> Kliknij „Edytuj", by zmieniać.</span>}
         </div>
+        <div style={lockStyle}>
         {(() => {
           const smc = prefs.smc || DEFAULT_SMC;
           const setSmc = (k, v) => setPrefs(p => ({ ...p, smc:{ ...DEFAULT_SMC, ...(p.smc||{}), [k]:v } }));
@@ -191,6 +215,7 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
             );
           });
         })()}
+        </div>{/* /lockStyle — koniec progów SMC */}
       </div>
 
       <div className="card" style={{borderColor:'rgba(255,138,117,.35)'}}>

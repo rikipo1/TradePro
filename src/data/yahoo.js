@@ -9,10 +9,7 @@ export const TFS = [
   { id:'D1',  interval:'1d',  range:'1y',  label:'D1'  },
 ];
 
-export async function yahooChart(symbol, tf){
-  const url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(symbol)
-    + '?interval=' + tf.interval + '&range=' + tf.range + '&includePrePost=false';
-  const j = await fetchJson(url);
+function parseYahoo(j, symbol){
   const r = j && j.chart && j.chart.result && j.chart.result[0];
   if(!r){
     const msg = j && j.chart && j.chart.error && j.chart.error.description;
@@ -33,4 +30,21 @@ export async function yahooChart(symbol, tf){
               : (meta.previousClose != null) ? meta.previousClose
               : (candles.length ? candles[0].o : null);
   return { candles, meta, price, prev, tz: meta.exchangeTimezoneName || '' };
+}
+
+export async function yahooChart(symbol, tf){
+  const url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(symbol)
+    + '?interval=' + tf.interval + '&range=' + tf.range + '&includePrePost=false';
+  return parseYahoo(await fetchJson(url), symbol);
+}
+
+/* Świece w KONKRETNYM oknie czasu (period1/period2 w sekundach UNIX).
+   Używane przez mini-wykres dziennika, by zakotwiczyć obraz na czasie WEJŚCIA
+   (a nie na sztywnym „ostatnie 5 dni") — dzięki temu świeca wejścia jest zawsze
+   w kadrze, a poziomy SL/TP1/TP2 pasują do świec. */
+export async function yahooChartWindow(symbol, interval, period1, period2){
+  const url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(symbol)
+    + '?interval=' + interval + '&period1=' + Math.floor(period1) + '&period2=' + Math.floor(period2)
+    + '&includePrePost=false';
+  return parseYahoo(await fetchJson(url), symbol);
 }
