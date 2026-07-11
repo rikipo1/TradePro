@@ -4,6 +4,7 @@ import { detectCandlePatterns } from '../patterns/index.js';
 import { computeSignal } from '../signals/engine.js';
 import { orientedVector } from '../signals/features.js';
 import { trainLogistic, fitIsotonic, brierScore } from '../signals/model.js';
+import { initPosition, stepPosition } from '../signals/tradeManager.js';
 import { htfTrend } from '../data/feed.js';
 
 /* ---------------- Faza 6: backtest / alerty ----------------
@@ -30,57 +31,25 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
   };
   for(let i = warmup; i < n - 1; i++){
     if(open){
-      /* ===== DYNAMICZNE ZARZĄDZANIE POZYCJĄ (ten sam schemat co paper live):
-         open → (po +1R) BE → (na TP1) partial 50% + runner → trailing za
-         strukturą (8-świecowy dołek/szczyt ± 0.25·ATR) do TP2 / stopa.
-         Kolejność w świecy pesymistyczna: najpierw stop, potem cele.       */
+      /* [W1] DYNAMICZNE ZARZĄDZANIE POZYCJĄ przez WSPÓLNY moduł tradeManager
+         (stepPosition) — dokładnie ta sama logika co paper live. Backtest dostarcza
+         realne intrabar high/low oraz strukturalny trailing (8-świecowy ekstrem). */
       const c = candles[i], dir = open.dir;
-      const costR = open.risk > 0 ? (open.costPx / open.risk) : 0;
-      const rOf = px => ((px - open.entry) / open.risk) * dir;
-      const stopHit = dir === 1 ? c.l <= open.slCur : c.h >= open.slCur;
-
-      if(stopHit){
-        let r, out2, tp2f = false;
-        if(open.stage === 'open'){ r = -1 - costR; out2 = 'SL'; }
-        else if(open.stage === 'be'){ r = rOf(open.slCur) - costR; out2 = 'BE'; }
-        else { r = open.banked + 0.5*rOf(open.slCur) - costR; out2 = 'TP1'; tp2f = open.sawTp2 === true; }
-        close({ i0:open.i0, i1:i, dir, r:+r.toFixed(3), out:out2, tp2:tp2f, prob:open.prob });
-        open = null; cooldownUntil = i + 5;
-        continue;
+      let trailLow = Infinity, trailHigh = -Infinity;         // 8-świecowe ekstrema do trailingu
+      for(let q=Math.max(0,i-7);q<=i;q++){
+        if(candles[q].l < trailLow) trailLow = candles[q].l;
+        if(candles[q].h > trailHigh) trailHigh = candles[q].h;
       }
-      const fav = dir === 1 ? c.h : c.l;                       // korzystne ekstremum świecy
-      const favR = ((fav - open.entry) / open.risk) * dir;
-      if(open.stage === 'open' && favR >= 1){                  // +1R → stop na wejście (BE)
-        open.stage = 'be';
-        open.slCur = open.entry;
-      }
-      if((open.stage === 'open' || open.stage === 'be')
-         && (dir === 1 ? c.h >= open.tp1 : c.l <= open.tp1)){  // TP1 → partial 50%, reszta biegnie
-        open.banked = 0.5 * open.rr1;
-        open.stage = 'runner';
-        open.slCur = dir === 1 ? Math.max(open.slCur, open.entry) : Math.min(open.slCur, open.entry);
-      }
-      if(open.stage === 'runner'){
-        if(dir === 1 ? c.h >= open.tp2 : c.l <= open.tp2){     // TP2 → domknij runnera
-          const r = open.banked + 0.5*rOf(open.tp2) - costR;
-          close({ i0:open.i0, i1:i, dir, r:+r.toFixed(3), out:'TP1', tp2:true, prob:open.prob });
-          open = null; cooldownUntil = i + 5;
-          continue;
-        }
-        /* trailing za strukturą: 8-świecowy dołek/szczyt ± bufor 0.25·ATR */
-        let ext = dir === 1 ? Infinity : -Infinity;
-        for(let q=Math.max(0,i-7);q<=i;q++){
-          if(dir === 1 && candles[q].l < ext) ext = candles[q].l;
-          if(dir === -1 && candles[q].h > ext) ext = candles[q].h;
-        }
-        const aI = ind.atr[i] != null ? ind.atr[i] : open.risk*0.5;
-        open.slCur = dir === 1 ? Math.max(open.slCur, ext - aI*0.25)
-                               : Math.min(open.slCur, ext + aI*0.25);
-        if(dir === 1 ? c.h >= open.tp2 : c.l <= open.tp2) open.sawTp2 = true;
-      }
-      if(i - open.i0 >= maxBars){                              // time-stop
-        const base = open.stage === 'runner' ? open.banked + 0.5*rOf(c.c) : rOf(c.c);
-        close({ i0:open.i0, i1:i, dir, r:+(base - costR).toFixed(3), out:'TIMEOUT', tp2:false, prob:open.prob });
+      const bar = {
+        o:c.o, h:c.h, l:c.l, c:c.c,
+        atr: ind.atr[i] != null ? ind.atr[i] : open.risk*0.5,
+        trailLow, trailHigh,
+        timeout: (i - open.i0 >= maxBars),
+      };
+      const { state, closed } = stepPosition(open, bar, { trailMode:'structure' });
+      Object.assign(open, state);
+      if(closed){
+        close({ i0:open.i0, i1:i, dir, r:+closed.r.toFixed(3), out:closed.out, tp2:closed.tp2, prob:open.prob });
         open = null; cooldownUntil = i + 5;
       }
       continue;
@@ -99,16 +68,15 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
     if(tfId) zonesI.__htf = htfTrend(candles.slice(0, i + 1), tfId);
     const sig = computeSignal(candles, ind, emaData, patsWrap, hasVol, i, zonesI);
     if(sig && sig.dir !== 0 && sig.levels){
-      open = {
-        i0:i, dir:sig.dir,
+      open = initPosition({
+        dir:sig.dir,
         entry:sig.levels.entry, sl:sig.levels.sl,
         tp1:sig.levels.tp1, tp2:sig.levels.tp2,
         risk:sig.levels.slDist,
         rr1:sig.levels.rr1 || 1.5,
         costPx: sig.levels.spreadPx || (ind.atr[i] ? ind.atr[i]*0.05 : 0),
-        factors: sig.factors, prob: sig.prob,
-        stage:'open', slCur: sig.levels.sl, banked: 0,
-      };
+      });
+      open.i0 = i; open.factors = sig.factors; open.prob = sig.prob;   // meta do etykiet/embargo
     }
   }
   const T = res.trades;
