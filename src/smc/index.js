@@ -2,9 +2,15 @@ import { sessionInfo } from '../utils/sessions.js';
 
 /* --- MARKET STRUCTURE z pivotów zigzag do indeksu i (bez lookahead) ---
    Zwraca sekwencję HH/HL/LH/LL, ostatnie swingi, oraz zakres do premium/discount. */
-export function marketStructure(piv, i){
-  // tylko potwierdzone piwoty przed/na i (odrzuć live pivot z przyszłości)
-  const P = piv.filter(p => p.i <= i);
+export function marketStructure(piv, i, opts){
+  /* [W6] tylko POTWIERDZONE piwoty do lastSwingHigh/Low, BOS/CHOCH i SL.
+     zigzag dopisuje na końcu piwot LIVE (niepotwierdzony, może repainować) —
+     wcześniej filtr `p.i <= i` go NIE odrzucał (bo jego indeks też jest ≤ i),
+     więc struktura i SL opierały się częściowo na punkcie, który mógł zniknąć.
+     Domyślnie useLive=false → wykluczamy piwot z flagą live. Live dozwolony
+     tylko do rysowania/UI (useLive=true). */
+  const useLive = !!(opts && opts.useLive);
+  const P = piv.filter(p => p.i <= i && (useLive || !p.live));
   if(P.length < 4) return null;
   const highs = P.filter(p => p.t === 'H');
   const lows  = P.filter(p => p.t === 'L');
