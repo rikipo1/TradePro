@@ -4,8 +4,11 @@ import { MiniLiveChart } from '../components/MiniLiveChart.jsx';
 import { Bus } from '../core/bus.js';
 import { CAP_MAP, capEnabled, capitalTick } from '../data/capital.js';
 import { fetchQuotes } from '../data/feed.js';
-import { paperFloating } from '../data/paper.js';
+import { paperFloating, resolvePaperList } from '../data/paper.js';
+import { riskStatus } from '../signals/riskEngine.js';
+import { fmtPips, signedPips, toPips } from '../constants/instruments.js';
 import { fmtPrice, pad2 } from '../utils/format.js';
+import { notifyUser } from '../utils/notify.js';
 
 export function fmtDT(ts){
   const d = new Date(ts);
@@ -17,7 +20,10 @@ export const RESULT_DEF = [
   ['be',  'BE',   0,   'var(--dim)'],
   ['sl',  'SL',  -1,   'var(--down)'],
 ];
-export function JournalScreen({ journal, setJournal }){
+export function JournalScreen({ journal, setJournal, prefs }){
+  /* [M5] badge stanu ryzyka konta: dzienne R, seria strat, kill-switch */
+  const risk = riskStatus(journal, { maxDailyLossR: (prefs && prefs.maxDailyLossR) != null ? prefs.maxDailyLossR : 3,
+    maxConsecLoss: (prefs && prefs.maxConsecLoss) != null ? prefs.maxConsecLoss : 4 });
   const [edit, setEdit] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [pick, setPick] = useState(null);
@@ -39,29 +45,57 @@ export function JournalScreen({ journal, setJournal }){
   const grossL = closed.reduce((a, e) => a + ((e.r || 0) < 0 ? -e.r : 0), 0);
   const openN = journal.filter(e => e.result === 'open' || e.result === 'pending').length;
 
+  /* powiadomienie o aktywacji LIMITU / zamknięciu pozycji z poziomu dziennika */
+  const journalNote = useCallback((e) => {
+    let msg;
+    if(e.result === 'open') msg = e.sym + ' ' + (e.dir > 0 ? 'LONG' : 'SHORT') + ': LIMIT aktywowany @ ' + fmtPrice(e.entry);
+    else if(e.result === 'cancelled') msg = e.sym + ': zlecenie LIMIT anulowane';
+    else msg = e.sym + ' ' + (e.dir > 0 ? 'LONG' : 'SHORT') + ': ' + String(e.result).toUpperCase()
+      + ' ' + ((e.r || 0) > 0 ? '+' : '') + (e.r || 0) + 'R';
+    Bus.show('📒 ' + msg);
+    try{ notifyUser('Rikipo Paper', msg); }catch(err){}
+  }, []);
+
+  /* [fix] AKTYWNE rozliczanie z poziomu dziennika: pobieramy cenę dla otwartych
+     ORAZ oczekujących (pending) pozycji i wołamy resolvePaperList — dzięki temu
+     zlecenia LIMIT aktywują się, a otwarte pozycje domykają się na SL/TP, także
+     gdy patrzysz na dziennik (nie tylko z 15 s monitora globalnego). */
   const loadPx = useCallback(async () => {
-    const openP = journal.filter(e => e.paper && e.result === 'open');
-    if(!openP.length){ setQ({}); return; }
+    const active = journal.filter(e => e.paper && (e.result === 'open' || e.result === 'pending'));
+    if(!active.length){ setQ({}); return; }
     setBusyPx(true);
-    const syms = Array.from(new Set(openP.map(e => e.sym)));
+    const syms = Array.from(new Set(active.map(e => e.sym)));
     const out = {};
     for(let s=0;s<syms.length;s++){
       const sym = syms[s];
+      let px = null;
       try{
         if(capEnabled() && CAP_MAP[sym]){
           const t = await capitalTick(sym);
-          if(t){ out[sym] = t.px; continue; }
+          if(t) px = t.px;
         }
       }catch(e){}
-      try{
-        const r = await fetchQuotes([sym]);
-        if(r && r[sym] && r[sym].price != null) out[sym] = r[sym].price;
-      }catch(e){}
+      if(px == null){
+        try{
+          const r = await fetchQuotes([sym]);
+          if(r && r[sym] && r[sym].price != null) px = r[sym].price;
+        }catch(e){}
+      }
+      if(px != null){
+        out[sym] = px;
+        setJournal(list => resolvePaperList(list, sym, px, journalNote) || list);
+      }
     }
     setQ(out);
     setBusyPx(false);
-  }, [journal]);
+  }, [journal, journalNote, setJournal]);
   useEffect(() => { loadPx(); }, [loadPx]);
+  /* auto-odświeżanie co 10 s, dopóki są otwarte/oczekujące pozycje */
+  useEffect(() => {
+    if(!openN) return;
+    const h = setInterval(() => { if(typeof document === 'undefined' || document.visibilityState === 'visible') loadPx(); }, 10000);
+    return () => clearInterval(h);
+  }, [openN, loadPx]);
 
   const resultOf = key => {
     for(let q=0;q<RESULT_DEF.length;q++){ if(RESULT_DEF[q][0] === key) return RESULT_DEF[q]; }
@@ -121,6 +155,15 @@ export function JournalScreen({ journal, setJournal }){
         <button className="iconbtn accent" onClick={() => setShowAdd(true)}><Ic d={IC.plus} size={19} /></button>
       </div>
 
+      {/* [M5] badge ryzyka konta */}
+      <div className="card" style={{marginTop:2, borderColor: risk.blocked ? 'var(--down)' : undefined, background: risk.blocked ? 'rgba(255,107,94,.08)' : undefined}}>
+        <div className="kv"><b>{risk.blocked ? '⛔ Stop dnia AKTYWNY' : '🛡 Ryzyko konta'}</b>
+          <span className="mono" style={{color: risk.blocked ? 'var(--down)' : 'var(--dim)'}}>
+            dziś {risk.dailyR >= 0 ? '+' : ''}{risk.dailyR}R · seria {risk.consecLosses}
+          </span></div>
+        {risk.blocked && <div className="mono" style={{fontSize:11, color:'var(--down)'}}>{risk.reason} — nowe wejścia zablokowane (wyjścia działają)</div>}
+      </div>
+
       <div className="card" style={{marginTop:2}}>
         <div className="kv"><b>Zamknięte transakcje</b><span className="mono">{closed.length}{openN ? ' · ' + openN + ' w trakcie' : ''}</span></div>
         <div className="kv"><b>Trafność</b><span className="mono" style={{color: wins >= losses ? 'var(--up)' : 'var(--down)'}}>{(wins + losses) ? (wins/(wins+losses)*100).toFixed(0) + '%' : '—'}</span></div>
@@ -134,6 +177,11 @@ export function JournalScreen({ journal, setJournal }){
         {journal.map(e => {
           const rd = resultOf(e.result);
           const isExp = expanded === e.id;
+          /* pipsy P/L: pływające (otwarta) lub zrealizowane (zamknięta) */
+          const plRef = e.result === 'open' ? q[e.sym] : e.exit;
+          const plDist = (plRef != null && e.entry != null) ? (plRef - e.entry) * (e.dir || 1) : null;
+          const plPipsN = plDist != null ? toPips(e.sym, plDist) : null;
+          const plPips = plPipsN != null ? ((plDist >= 0 ? '+' : '−') + plPipsN + 'p') : null;
           return (
             <React.Fragment key={e.id}>
             <div className="wl-row" style={isExp ? {borderBottomColor:'transparent'} : null}
@@ -153,9 +201,19 @@ export function JournalScreen({ journal, setJournal }){
                 </div>
                 <div className="wl-sym mono" style={{whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
                   {fmtDT(e.ts)}
-                  {e.entry != null ? ' · E ' + fmtPrice(e.entry) + ' SL ' + fmtPrice(e.sl) : ''}
+                  {e.entry != null ? ' · wejście ' + fmtPrice(e.entry) : ''}
                   {e.note ? ' · ' + e.note : ''}
                 </div>
+                {/* PIPSY (widoczne, bez ucinania): wejście=0, SL/TP jako offset + P/L */}
+                {e.entry != null && e.sl != null && (
+                  <div className="mono" style={{fontSize:11, marginTop:2, display:'flex', gap:8, flexWrap:'wrap'}}>
+                    <span style={{color:'var(--dim2)'}}>0</span>
+                    <span style={{color:'var(--down)', fontWeight:700}}>SL {signedPips(e.sym, e.sl - e.entry)}</span>
+                    {e.tp1 != null && <span style={{color:'var(--up)', fontWeight:700}}>TP1 {signedPips(e.sym, e.tp1 - e.entry)}</span>}
+                    {e.tp2 != null && <span style={{color:'var(--up)', fontWeight:600}}>TP2 {signedPips(e.sym, e.tp2 - e.entry)}</span>}
+                    {plPips && <span style={{color: plDist >= 0 ? 'var(--up)' : 'var(--down)', fontWeight:800}}>· P/L {plPips}</span>}
+                  </div>
+                )}
               </div>
               <span className="wl-chip mono" style={{
                 background: e.result === 'open' ? 'rgba(79,216,255,.13)' : e.result === 'pending' ? 'rgba(255,201,77,.13)' : ((e.r || 0) > 0 ? 'rgba(47,214,174,.14)' : (e.r || 0) < 0 ? 'rgba(255,107,94,.14)' : 'rgba(143,176,172,.12)'),

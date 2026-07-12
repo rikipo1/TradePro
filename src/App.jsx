@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { IC, Ic } from './components/icons.jsx';
 import { DEFAULT_PREFS, DEFAULT_SMC, DEFAULT_WL } from './constants/defaults.js';
 import { Bus } from './core/bus.js';
-import { Store } from './core/store.js';
+import { Store, modelKey, migrateModelV2 } from './core/store.js';
 import { CAP_MAP, CapCfg, CapSess, capEnabled, capitalTick, setCapWarned } from './data/capital.js';
 import { fetchQuotes } from './data/feed.js';
 import { resolvePaperList } from './data/paper.js';
@@ -12,7 +12,9 @@ import { InfoScreen } from './screens/InfoScreen.jsx';
 import { JournalScreen } from './screens/JournalScreen.jsx';
 import { WatchlistScreen } from './screens/WatchlistScreen.jsx';
 import { analyzeSymbol } from './signals/engine.js';
+import { riskStatus } from './signals/riskEngine.js';
 import { correlationMatrix, duplicatesExposure } from './signals/correlation.js';
+import { signedPips } from './constants/instruments.js';
 import { fmtPrice } from './utils/format.js';
 import { notifyUser } from './utils/notify.js';
 
@@ -71,6 +73,8 @@ export function App(){
       setToast(m);
       setTimeout(() => setToast(null), 2800);
     };
+    /* [C1] migracja v2: usuń stare GLOBALNE klucze modelu (jednorazowo) */
+    migrateModelV2((m) => Bus.show('⚠ ' + m));
     return () => { Bus.fn = null; };
   }, []);
 
@@ -124,6 +128,7 @@ export function App(){
   const bgPbRef = useRef({});
   const bgMacroRef = useRef(null);
   const bgBusyRef = useRef(false);
+  const bgRiskRef = useRef(null); // [M5] ostatnio zgłoszony powód stopu dnia (anty-spam toastu)
   const bgClosesRef = useRef({}); // sym -> ostatnie zamknięcia (do korelacji)
   useEffect(() => {
     if(!prefs.bgScan || !prefs.alert) return;
@@ -133,11 +138,27 @@ export function App(){
       bgBusyRef.current = true;
       try{
         const activeSym = (screen === 'chart' && active) ? active.sym : null;
+        /* [M5] Risk Engine (kill-switch konta): przy przekroczeniu dziennego limitu
+           strat / serii strat NIE alarmujemy o nowych wejściach; toast raz na powód. */
+        const rs = riskStatus(journal, { maxDailyLossR: prefs.maxDailyLossR, maxConsecLoss: prefs.maxConsecLoss });
+        if(rs.blocked){
+          if(bgRiskRef.current !== rs.reason){
+            bgRiskRef.current = rs.reason;
+            notifyUser('Rikipo Trader — ⛔ Stop dnia', rs.reason);
+            Bus.show('⛔ Stop dnia: ' + rs.reason);
+          }
+        } else { bgRiskRef.current = null; }
         for(let s=0;s<wl.length;s++){
           const it = wl[s];
           if(!it || it.sym === activeSym) continue;
           let res = null;
-          try{ res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc, Store.get('rt_model_weights', null), Store.get('rt_model_calib', null)); }catch(e){ continue; }
+          /* [C1][C3] model PER instrument×TF — i tylko gdy wiarygodny (reliable),
+             inaczej DEFAULT_WEIGHTS (weights=calib=null). NIGDY model innej pary. */
+          const mMeta = Store.get(modelKey('meta', it.sym, tfObj.id), null);
+          const rel = !!(mMeta && mMeta.reliable);
+          const mW = rel ? Store.get(modelKey('weights', it.sym, tfObj.id), null) : null;
+          const mC = rel ? Store.get(modelKey('calib', it.sym, tfObj.id), null) : null;
+          try{ res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc, mW, mC); }catch(e){ continue; }
           if(res && res.data && res.data.candles && res.data.candles.length > 30){
             bgClosesRef.current[it.sym] = res.data.candles.slice(-200).map(cc => cc.c);
           }
@@ -175,6 +196,7 @@ export function App(){
             }
           }
 
+          if(rs.blocked) continue;   // [M5] stop dnia — pomijamy alerty o nowych wejściach (okazje/makro powyżej działają)
           if(sig.dir === 0) continue;
           if(prefs.onlyStrong && !sig.strong) continue;
           if(prefs.waitPullback && sig.entryQuality && sig.entryQuality.chase && !sig.strong) continue;
@@ -201,10 +223,12 @@ export function App(){
               if(dup) dupTag = ' · 🛑 DUBLUJE ' + dup.with + ' (corr ' + dup.corr + ')';
             }
           }catch(e){}
-          const pTag = sig.setupScore != null ? 'P ' + sig.setupScore + '%' : (sig.score > 0 ? '+' : '') + sig.score;
+          const pTag = sig.setupScore != null ? (sig.probCalibrated ? 'P ' + sig.setupScore + '%' : 'score ' + sig.setupScore) : (sig.score > 0 ? '+' : '') + sig.score;
           const msg = (strong ? '★ ' : '') + it.sym + ' ' + tfObj.label + ': ' + dtxt
             + ' (' + pTag + htfTag + eqTag + ')'
-            + (sig.levels ? ' · SL ' + fmtPrice(sig.levels.sl) + ' · TP1 ' + fmtPrice(sig.levels.tp1) : '')
+            + (sig.levels ? ' · wejście ' + fmtPrice(sig.levels.entry) + ' (0)'
+                + ' · SL ' + signedPips(it.sym, sig.levels.sl - sig.levels.entry)
+                + ' · TP1 ' + signedPips(it.sym, sig.levels.tp1 - sig.levels.entry) : '')
             + dupTag;
           notifyUser('Rikipo Trader — ' + (strong ? 'MOCNY ' : '') + dtxt + ' ' + it.sym, msg);
           Bus.show((strong ? '🔥 ' : '⚡ ') + '[skaner] ' + msg);
@@ -217,7 +241,7 @@ export function App(){
     const first = setTimeout(runScan, 4000);
     const h = setInterval(runScan, 45000);
     return () => { clearTimeout(first); clearInterval(h); };
-  }, [prefs.bgScan, prefs.alert, prefs.pbAlert, prefs.tf, prefs.source, prefs.onlyStrong, prefs.waitPullback, prefs.minScore, wl, screen, active]);
+  }, [prefs.bgScan, prefs.alert, prefs.pbAlert, prefs.tf, prefs.source, prefs.onlyStrong, prefs.waitPullback, prefs.minScore, prefs.maxDailyLossR, prefs.maxConsecLoss, journal, wl, screen, active]);
 
   const openChart = (item) => {
     setActive(item);
@@ -236,7 +260,7 @@ export function App(){
       {screen === 'chart' && active && (
         <ChartScreen item={active} onBack={() => setScreen('list')} prefs={prefs} setPrefs={setPrefs} ai={ai} setAi={setAi} addJournal={addJournal} journal={journal} resolveTick={resolveTick} />
       )}
-      {screen === 'journal' && <JournalScreen journal={journal} setJournal={setJournal} />}
+      {screen === 'journal' && <JournalScreen journal={journal} setJournal={setJournal} prefs={prefs} />}
       {screen === 'info' && <InfoScreen prefs={prefs} setPrefs={setPrefs} ai={ai} setAi={setAi} cap={cap} setCap={setCap} wl={wl} setWl={setWl} journal={journal} setJournal={setJournal} />}
 
       <div className="nav">

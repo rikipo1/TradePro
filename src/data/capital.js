@@ -238,6 +238,35 @@ export async function capitalChart(symbol, tf){
     live: true,
   };
 }
+/* Świece Capital.com w KONKRETNYM oknie czasu [fromSec, toSec] (sekundy UNIX).
+   Używa parametrów from/to API Capital — pozwala zakotwiczyć mini-wykres dziennika
+   na czasie WEJŚCIA (zamiast „ostatnie N świec"). */
+export async function capitalChartWindow(symbol, tf, fromSec, toSec){
+  const epic = await capResolveEpic(symbol);
+  const res = CAP_RES[tf.id] || 'MINUTE_5';
+  const iso = s => new Date(s*1000).toISOString().slice(0, 19); // yyyy-MM-ddTHH:mm:ss (UTC)
+  const from = iso(fromSec), to = iso(toSec);
+  const j = await capGet('/api/v1/prices/' + epic + '?resolution=' + res
+    + '&from=' + from + '&to=' + to + '&max=1000');
+  const arr = (j && j.prices) || [];
+  const candles = [];
+  for(let q=0;q<arr.length;q++){
+    const p = arr[q];
+    const o = capMid(p.openPrice), h = capMid(p.highPrice), l = capMid(p.lowPrice), c = capMid(p.closePrice);
+    if(o == null || h == null || l == null || c == null) continue;
+    const ts = p.snapshotTimeUTC ? Date.parse(p.snapshotTimeUTC + 'Z') : Date.parse(p.snapshotTime);
+    if(!isFinite(ts)) continue;
+    candles.push({ t: Math.floor(ts/1000), o, h, l, c, v: p.lastTradedVolume || 0 });
+  }
+  if(!candles.length) throw new Error('brak świec Capital w oknie');
+  Net.last = 'Capital.com LIVE'; Net.mode = 'capital';
+  return {
+    candles, meta:{}, tz:'',
+    price: candles[candles.length-1].c,
+    prev: candles[0].o,
+    live: true,
+  };
+}
 export async function capitalTick(symbol){
   const epic = await capResolveEpic(symbol);
   const j = await capGet('/api/v1/markets/' + epic);

@@ -26,7 +26,48 @@ npm install       # instalacja zależności
 npm run dev       # serwer deweloperski (http://localhost:5173)
 npm run build     # produkcyjny build do katalogu dist/
 npm run preview   # podgląd zbudowanej wersji
+npm test          # testy jednostkowe logiki finansowej (Vitest)
 ```
+
+## Model per-instrument / TF
+
+Model prawdopodobieństwa P(win) (wagi regresji logistycznej + kalibracja isotonic
++ historia kNN) jest trenowany i przechowywany **osobno dla każdej pary
+instrument × interwał**. Klucze w `localStorage` są namespace'owane
+(`rt_weights_<sym>_<tf>`, `rt_calib_…`, `rt_knn_…`, `rt_meta_…`) — trening na
+DAX·M5 nie wpływa na EUR/USD·H1 ani na DAX·H1.
+
+- **Brak modelu dla danej pary → `DEFAULT_WEIGHTS`** (rozsądne priory), bez
+  kalibracji i bez kNN. Nigdy nie używamy modelu innej pary.
+- **Wagi wyuczone wchodzą do toru decyzyjnego dopiero, gdy model jest
+  „wiarygodny"** (patrz niżej). Do tego czasu — nawet po treningu — używane są
+  wagi domyślne, a UI pokazuje `score (niekalibrowany)` zamiast `P(win) xx%`.
+- Sizing: **fixed-fractional 0,5%** dopóki model nie jest wiarygodny; Kelly
+  ćwierć dopiero przy skalibrowanym, wiarygodnym modelu.
+- **Migracja:** stare GLOBALNE klucze (`rt_model_*`) są jednorazowo usuwane
+  (dane użytkownika — dziennik, watchlista — nienaruszone), z komunikatem
+  „Zresetowano stary globalny model — wytrenuj per instrument/TF".
+
+> Po aktualizacji **przetrenuj model osobno dla każdej pary sym × TF** — stare
+> globalne wagi zostały zresetowane.
+
+## Walidacja k-fold (purged walk-forward)
+
+Trening wag („🧠 Trenuj wagi") używa **K-fold purged walk-forward** (domyślnie
+K = 5) zamiast pojedynczego splitu 60/40:
+
+- oś czasu dzielona na K+1 bloków; dla foldu *k* trenujemy na blokach `[0..k]`,
+  testujemy na bloku `k+1`;
+- **embargo** (do treningu tylko próbki zamknięte przed startem testu) +
+  **purging** (López de Prado — usuwamy próbki, których okno nachodzi na okno
+  testowe);
+- raportujemy **medianę i IQR** (avgR, PF, win%, Brier) oraz **łączny n_oos**;
+- **wiarygodność** = `n_oos ≥ 100` **oraz** `mediana avgR > 0` **oraz**
+  `75-percentyl Brier < 0.25`. Tylko wtedy włączają się wyuczone wagi,
+  kalibracja i kNN;
+- wagi **produkcyjne** trenowane są osobno na całości danych (z opcjonalnym
+  buforem między-sesyjnym `rt_samples_*`), a metryki pochodzą wyłącznie z OOS
+  k-fold — nie mylimy wag produkcyjnych z walidacją.
 
 ## Struktura projektu
 

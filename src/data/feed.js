@@ -1,8 +1,8 @@
 import { Bus } from '../core/bus.js';
 import { fetchJson } from '../core/net.js';
-import { CAP_MAP, capEnabled, capWarned, capitalChart, setCapWarned } from './capital.js';
+import { CAP_MAP, capEnabled, capWarned, capitalChart, capitalChartWindow, setCapWarned } from './capital.js';
 import { stooqDaily } from './stooq.js';
-import { yahooChart } from './yahoo.js';
+import { yahooChart, yahooChartWindow } from './yahoo.js';
 import { atrSeries, emaOver } from '../indicators/index.js';
 import { zigzag } from '../patterns/index.js';
 import { marketStructure } from '../smc/index.js';
@@ -26,6 +26,33 @@ export async function fetchChart(symbol, tf){
     }
     throw e;
   }
+}
+
+/* Świece zakotwiczone na oknie [t0,t1] (sekundy) — dla mini-wykresu dziennika.
+   PRIORYTET: Capital.com (oryginalne dane brokera, cel = APK). Yahoo jest tylko
+   automatycznym zapasem, gdyby Capital był niedostępny (żeby wykres nie zniknął).
+   approx=true = pokazujemy przybliżenie (ostatnie świece zamiast dokładnego okna). */
+export async function fetchChartWindow(symbol, tf, t0, t1){
+  // 1) Capital.com w oknie from/to (oryginalny wykres brokera)
+  if(capEnabled() && CAP_MAP[symbol]){
+    try{
+      const r = await capitalChartWindow(symbol, tf, t0, t1);
+      if(r && r.candles && r.candles.length >= 3) return { ...r, approx:false };
+    }catch(e){}
+    // Capital bez okna (ostatnie świece) — nadal DANE CAPITAL, nie Yahoo
+    try{
+      const r = await capitalChart(symbol, tf);
+      if(r && r.candles && r.candles.length >= 3) return { ...r, approx:true };
+    }catch(e){}
+  }
+  // 2) zapas: Yahoo w oknie (przeglądarka / instrument spoza Capital)
+  try{
+    const r = await yahooChartWindow(symbol, tf.interval, t0, t1);
+    if(r && r.candles && r.candles.length >= 3) return { ...r, approx:false };
+  }catch(e){}
+  // 3) ostateczny zapas: zwykły fetchChart
+  const r2 = await fetchChart(symbol, tf);
+  return { ...r2, approx:true };
 }
 
 export async function searchSymbols(qstr){

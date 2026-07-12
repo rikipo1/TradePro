@@ -112,9 +112,16 @@ export function applyIsotonic(p, calib) {
   for (let i = 0; i < calib.length; i++) {
     if (p <= calib[i].hi) return cl(calib[i].v);
     const next = calib[i + 1];
-    if (next && p < next.lo) { // interpolacja między blokami
-      const t = (p - calib[i].hi) / (next.lo - calib[i].hi || 1e-9);
-      return cl(calib[i].v + t * (next.v - calib[i].v));
+    if (next) {
+      /* [M6] bloki stykające się/nachodzące (next.lo <= calib[i].hi) → BEZ
+         interpolacji (uniknięcie dzielenia przez ~0 i ekstrapolacji w tył).
+         Interpolujemy tylko przy REALNEJ luce między blokami. */
+      const gap = next.lo - calib[i].hi;
+      if (gap <= 0) continue;
+      if (p < next.lo) {
+        const t = (p - calib[i].hi) / gap;
+        return cl(calib[i].v + t * (next.v - calib[i].v));
+      }
     }
   }
   return cl(calib[calib.length - 1].v);

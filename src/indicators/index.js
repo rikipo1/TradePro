@@ -1,4 +1,21 @@
 /* ========================== [3] WSKAŹNIKI ============================ */
+
+/* [M3] Czy instrument ma WIARYGODNY wolumen? Wcześniej wystarczyła JEDNA świeca
+   z v>0 (candles.some(c=>c.v>0)) — pojedynczy artefakt włączał całą logikę
+   wolumenową (VWAP, OBV, RelVol) na instrumentach bez realnego wolumenu.
+   Teraz wymagamy wolumenu na ≥60% świec ORAZ dodatniej wariancji (nie stała). */
+export function hasVolume(candles){
+  if(!candles || candles.length < 5) return false;
+  let nz = 0, sum = 0, cnt = 0;
+  for(const c of candles){ const v = c.v || 0; if(v > 0){ nz++; sum += v; cnt++; } }
+  if(nz / candles.length < 0.6) return false;
+  if(cnt < 2) return false;
+  const mean = sum / cnt;
+  let varSum = 0;
+  for(const c of candles){ const v = c.v || 0; if(v > 0){ const d = v - mean; varSum += d * d; } }
+  return (varSum / cnt) > 0; // dodatnia wariancja (wolumen nie jest stały)
+}
+
 export function emaSeries(closes, n){
   const out = new Array(closes.length).fill(null);
   if(closes.length < n) return out;

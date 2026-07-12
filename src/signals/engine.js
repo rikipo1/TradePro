@@ -1,9 +1,9 @@
 import { spreadPx } from '../constants/instruments.js';
 import { getChart, htfTrend } from '../data/feed.js';
-import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
+import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, hasVolume, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
 import { detectPatterns, zigzag } from '../patterns/index.js';
 import { displacement, relativeVolume, smcAnalyze } from '../smc/index.js';
-import { sessionInfo } from '../utils/sessions.js';
+import { sessionInfo, macroWindow } from '../utils/sessions.js';
 import { buildPullbackPlan } from './pullback.js';
 import { buildOpportunities } from './opportunities.js';
 import { classifyRegime } from './regime.js';
@@ -228,34 +228,11 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   }
 
   score = Math.max(-100, Math.min(100, Math.round(score)));
-
-  /* --- JAKOŚĆ WEJŚCIA liczona PRZED decyzją o kierunku ---
-     dystans ceny do najbliższej kotwicy (EMA20 / VWAP / świeżo złamana strefa).
-     Blisko kotwicy = świeże wejście przy strefie (dobre, ciasny SL);
-     daleko = „gonienie ruchu" (złe RR, wejście w biegu).
-     Kierunek prawdopodobny bierzemy ze znaku score, by dobrać właściwą strefę. */
-  const probDir = score > 0 ? 1 : score < 0 ? -1 : 0;
-  const anchors = [];
-  if(v20 != null) anchors.push({ name:'EMA20', px:v20 });
-  if(vw != null)  anchors.push({ name:'VWAP',  px:vw });
-  if(probDir === 1 && nearSup) anchors.push({ name:'wsparcie', px:nearSup.hi });
-  if(probDir === -1 && nearRes) anchors.push({ name:'opór', px:nearRes.lo });
-  let bestDist = null, bestName = null;
-  for(let q=0;q<anchors.length;q++){
-    const d = Math.abs(price - anchors[q].px) / atr;
-    if(bestDist == null || d < bestDist){ bestDist = d; bestName = anchors[q].name; }
-  }
-  let eqGrade = null, eqGood = false, eqChase = false, eqPts = 0;
-  if(bestDist != null){
-    if(bestDist <= 0.6){ eqGrade = 'przy strefie'; eqGood = true; eqPts = 6; }
-    else if(bestDist <= 1.3){ eqGrade = 'akceptowalne'; eqPts = 0; }
-    else { eqGrade = 'gonienie ruchu'; eqChase = true; eqPts = -8; }
-    /* korekta score PRZED progiem — dobre wejście lekko premiowane,
-       gonienie karane, więc kara realnie wpływa na to czy sygnał w ogóle powstanie */
-    if(probDir !== 0 && eqPts !== 0){
-      score = Math.max(-100, Math.min(100, score + probDir*eqPts));
-    }
-  }
+  /* [W2] `score` (suma punktów) i `reasons`/`warns` pozostają WYŁĄCZNIE jako
+     diagnostyka do UI/AI. Żadna bramka decyzyjna (dir / akceptacja / sizing) nie
+     zależy już od `score`. Kierunek bierzemy z factors.dirConsensus + filarów,
+     akceptację z prob/EV. Jakość wejścia (eqChase) liczymy PO ustaleniu dir
+     i wpływa na decyzję TYLKO RAZ (gate prob<0.66 / waitPullback niżej). */
 
   /* --- konfluencja z 3 ORTOGONALNYCH filarów ---
      Poprzednio wszystkie 3 czytały „cena vs EMA/VWAP" → jeden dowód liczony 3×.
@@ -296,7 +273,12 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     relVol: relVol ? { ...relVol, dir: (c.c >= c.o ? 1 : -1) } : null,
     htfDir, liquidity: liq,
   });
-  const weights = (srOverride && srOverride.__weights) || null;
+  /* [C3] wyuczone wagi w torze DECYZYJNYM stosujemy TYLKO gdy model jest
+     wiarygodny (reliable z k-fold: n_oos≥100, mediana avgR>0, 75-pct Brier<0.25).
+     W przeciwnym razie — nawet jeśli w Store są wagi „eksperymentalne" —
+     używamy DEFAULT_WEIGHTS. Kalibracja i kNN też tylko przy reliable. */
+  const reliable = !!(srOverride && srOverride.__reliable);
+  const weights = (reliable && srOverride && srOverride.__weights) || null;
 
   let dir = factors.dirConsensus > 0.06 ? 1 : factors.dirConsensus < -0.06 ? -1 : 0;
 
@@ -304,14 +286,35 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   if(dir === 1 && bullPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — LONG odrzucony'); }
   if(dir === -1 && bearPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — SHORT odrzucony'); }
 
-  /* P(win | dir) z modelu + kalibracja isotonic (jeśli wyuczona z ≥150 próbek) */
-  const calibMap = (srOverride && srOverride.__calib) || null;
+  /* --- [W2] JAKOŚĆ WEJŚCIA — liczona z REALNEGO kierunku (dir z factors/filarów),
+     NIE ze znaku `score`. Dystans do najbliższej kotwicy (EMA20/VWAP/strefa):
+     blisko = świeże wejście (ciasny SL); daleko = „gonienie ruchu". Nie modyfikuje
+     już `score` — wpływa na decyzję wyłącznie przez gate eqChase niżej (raz). */
+  const anchors = [];
+  if(v20 != null) anchors.push({ name:'EMA20', px:v20 });
+  if(vw != null)  anchors.push({ name:'VWAP',  px:vw });
+  if(dir === 1 && nearSup) anchors.push({ name:'wsparcie', px:nearSup.hi });
+  if(dir === -1 && nearRes) anchors.push({ name:'opór', px:nearRes.lo });
+  let bestDist = null, bestName = null;
+  for(let q=0;q<anchors.length;q++){
+    const dst = Math.abs(price - anchors[q].px) / atr;
+    if(bestDist == null || dst < bestDist){ bestDist = dst; bestName = anchors[q].name; }
+  }
+  let eqGrade = null, eqGood = false, eqChase = false;
+  if(bestDist != null){
+    if(bestDist <= 0.6){ eqGrade = 'przy strefie'; eqGood = true; }
+    else if(bestDist <= 1.3){ eqGrade = 'akceptowalne'; }
+    else { eqGrade = 'gonienie ruchu'; eqChase = true; }
+  }
+
+  /* P(win | dir) z modelu + kalibracja isotonic — [C3] kalibracja tylko reliable */
+  const calibMap = (reliable && srOverride && srOverride.__calib) || null;
   let prob = dir !== 0 ? predictProb(orientedVector(factors, dir), weights) : 0.5;
   if(dir !== 0 && calibMap) prob = applyIsotonic(prob, calibMap);
 
   /* Similarity Engine (kNN): "co robiły podobne historyczne setupy" —
-     nieliniowa, empiryczna korekta P (wpływ ograniczony, maks ~35%) */
-  const knnHist = (srOverride && srOverride.__knn) || null;
+     nieliniowa, empiryczna korekta P (wpływ ograniczony, maks ~35%) [C3] tylko reliable */
+  const knnHist = (reliable && srOverride && srOverride.__knn) || null;
   let similar = null;
   if(dir !== 0 && knnHist && knnHist.length >= 40){
     similar = similarOutcomes(knnHist, orientedVector(factors, dir), 20);
@@ -438,10 +441,18 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
       warns.push('Odrzucony przez EV/prob: P(win) ' + Math.round(prob*100) + '% · EV ' + ev.toFixed(2) + 'R (próg P ' + Math.round(minProb*100) + '%, wymagane EV>0)');
       out.dir = 0; dir = 0; delete out.levels; out.evBlock = true;
     } else {
-      out.sizing = positionSizing(prob, out.levels.rr1 || 1.5, { volState: regime.volState });
+      /* [W3/C3] sizing: Kelly WYŁĄCZNIE przy wiarygodnym, skalibrowanym modelu;
+         inaczej fixed-fractional (stałe ryzyko, niezależne od niepewnego p). */
+      const calibrated = !!(reliable && calibMap);
+      out.sizing = positionSizing(prob, out.levels.rr1 || 1.5,
+        { volState: regime.volState, mode: calibrated ? 'kelly' : 'fixed', calibrated });
     }
   }
   out.prob = +prob.toFixed(3);
+  /* [C3] flaga: czy P(win) jest SKALIBROWANE (reliable+calib). Gdy false — UI
+     ma pokazać „score (niekalibrowany)" zamiast „P xx%", bo setupScore to wtedy
+     surowe wyjście DEFAULT_WEIGHTS, nie realne prawdopodobieństwo. */
+  out.probCalibrated = !!(reliable && calibMap);
   out.setupScore = Math.round(prob * 100);
   if(similar) out.similar = { n: similar.n, wins: similar.wins, p: similar.pEmp, dist: similar.avgDist };
   out.strong = out.dir !== 0 && prob >= 0.66;
@@ -454,23 +465,13 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   out.liquidityLevels = { pdh: liq.pdh, pdl: liq.pdl, todayHigh: liq.todayHigh, todayLow: liq.todayLow };
   if(vp) out.vp = vp;
 
-  /* okna makro / otwarcia sesji (czas lokalny) — INFORMACYJNIE (bez blokady wejść) */
-  const dt = new Date();
-  const hm = dt.getHours()*60 + dt.getMinutes();
-  const wins = [
-    [9*60,        9*60+15,  'otwarcie DAX 09:00'],
-    [14*60+22,    14*60+42, 'publikacje USA 14:30'],
-    [15*60+25,    15*60+45, 'otwarcie Wall Street 15:30'],
-    [15*60+52,    16*60+12, 'dane USA 16:00'],
-    [19*60+52,    20*60+15, 'FOMC / minutes 20:00'],
-  ];
-  for(let q=0;q<wins.length;q++){
-    if(hm >= wins[q][0] && hm <= wins[q][1]){
-      out.macroWindow = wins[q][2];
-      if(atIdx == null){
-        warns.push('Okno makro: ' + wins[q][2] + ' — podwyższona zmienność (wejścia NIE są blokowane, uważaj na szarpnięcia)');
-      }
-      break;
+  /* [M1] okna makro liczone z CZASU ŚWIECY/UTC (spójnie live i backtest) — INFORMACYJNIE */
+  const macroDt = isLive ? new Date() : new Date(c.t*1000);
+  const mw = macroWindow(macroDt);
+  if(mw){
+    out.macroWindow = mw;
+    if(atIdx == null){
+      warns.push('Okno makro: ' + mw + ' — podwyższona zmienność (wejścia NIE są blokowane, uważaj na szarpnięcia)');
     }
   }
 
@@ -534,7 +535,7 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
 export function indicatorsFor(candles, tfId){
   if(!candles || candles.length < 5) return null;
   const closes = candles.map(c => c.c);
-  const hasVol = candles.some(c => c.v > 0);
+  const hasVol = hasVolume(candles); // [M3] ≥60% świec z wolumenem + dodatnia wariancja
   const atr = atrSeries(candles, 14);
   let atrLast = null;
   for(let i=atr.length-1;i>=0;i--){ if(atr[i] != null){ atrLast = atr[i]; break; } }

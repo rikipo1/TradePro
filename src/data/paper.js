@@ -1,4 +1,5 @@
 import { coachReview } from '../smc/index.js';
+import { stepPositionTick } from '../signals/tradeManager.js';
 
 /* --- Paper trading: wirtualne pozycje rozliczane po żywej cenie ---
    Zarządzanie pozycją jak w backteście (ten sam schemat):
@@ -44,53 +45,40 @@ export function resolvePaperList(list, sym, px, notify){
 
     if(e.result !== 'open') return e;
 
-    /* ---- otwarta pozycja: zarządzanie etapami ---- */
-    const stage = e.stage || 'open';
-    const slCur = e.slDyn != null ? e.slDyn : e.sl;
-    const rOf = (p) => ((p - e.entry) / e.risk) * d;
-    const stopHit = d === 1 ? px <= slCur : px >= slCur;
+    /* ---- otwarta pozycja: zarządzanie przez WSPÓLNY moduł tradeManager [W1] ----
+       Paper pracuje na tiku 15 s (px ≈ close), więc używamy stepPositionTick,
+       który degraduje do modelu „tik jako close" i — bez świec w monitorze —
+       trailinguje 1R za ceną (przybliżenie, flaga trailApprox). Backtest jest
+       pesymistyczny (realny intrabar SL-first + trailing strukturalny). */
+    const prevStage = e.stage || 'open';
+    const prevSl = e.slDyn != null ? e.slDyn : e.sl;
+    const st = {
+      dir: d, entry: e.entry, sl: e.sl, tp1: e.tp1, tp2: e.tp2,
+      risk: e.risk, rr1: e.rr1 || 1.5, costR: 0,
+      stage: prevStage, slCur: prevSl, banked: e.banked || 0, sawTp2: !!e.sawTp2,
+    };
+    const { state, closed, trailApprox } = stepPositionTick(st, px);
 
-    if(stopHit){
+    if(closed){
       changed = true;
-      let res, r;
-      if(stage === 'open'){ res = 'sl'; r = -1; }
-      else if(stage === 'be'){ res = 'be'; r = +rOf(slCur).toFixed(2); }
-      else { res = 'tp1'; r = +((e.banked || 0) + 0.5 * rOf(slCur)).toFixed(2); }
-      const done = { ...e, result:res, r, exit:slCur, exitTs:Date.now() };
+      const resMap = { SL:'sl', BE:'be', TP1: closed.tp2 ? 'tp2' : 'tp1', TIMEOUT:'timeout' };
+      const done = { ...e, result: resMap[closed.out] || closed.out.toLowerCase(),
+        r: +closed.r.toFixed(2), exit: closed.exit, exitTs: Date.now(),
+        stage: state.stage, slDyn: state.slCur, banked: state.banked };
+      if(trailApprox) done.trailApprox = true;
       try{ done.coach = coachReview(done, list); }catch(err){}
       if(notify) notify(done);
       return done;
     }
 
-    let ne = e, mut = false;
-    const bump = () => { if(!mut){ ne = { ...e }; mut = true; } };
-
-    if(stage === 'open' && rOf(px) >= 1){                    // +1R → stop na BE
-      bump(); ne.stage = 'be'; ne.slDyn = e.entry;
+    /* nadal otwarta: przenieś zmiany etapu/SL (BE, partial, trailing) */
+    if(state.stage !== prevStage || state.slCur !== prevSl || (state.banked || 0) !== (e.banked || 0)){
+      changed = true;
+      const ne = { ...e, stage: state.stage, slDyn: state.slCur, banked: state.banked };
+      if(state.stage === 'runner' && prevStage !== 'runner') ne.partialTs = Date.now();
+      if(trailApprox) ne.trailApprox = true;
+      return ne;
     }
-    const st2 = ne.stage || 'open';
-    if((st2 === 'open' || st2 === 'be') && (d === 1 ? px >= e.tp1 : px <= e.tp1)){
-      bump();                                                 // TP1 → partial 50%
-      ne.stage = 'runner';
-      ne.banked = +(0.5 * (e.rr1 || 1.5)).toFixed(2);
-      ne.slDyn = d === 1 ? Math.max(ne.slDyn != null ? ne.slDyn : e.sl, e.entry)
-                         : Math.min(ne.slDyn != null ? ne.slDyn : e.sl, e.entry);
-      ne.partialTs = Date.now();
-    }
-    if((ne.stage || stage) === 'runner'){
-      if(e.tp2 != null && (d === 1 ? px >= e.tp2 : px <= e.tp2)){  // TP2 → koniec
-        changed = true;
-        const r = +(((ne.banked != null ? ne.banked : e.banked) || 0) + 0.5 * rOf(e.tp2)).toFixed(2);
-        const done = { ...(mut ? ne : e), result:'tp2', r, exit:e.tp2, exitTs:Date.now() };
-        try{ done.coach = coachReview(done, list); }catch(err){}
-        if(notify) notify(done);
-        return done;
-      }
-      const trail = d === 1 ? px - e.risk : px + e.risk;      // trailing 1R za ceną
-      const cur = ne.slDyn != null ? ne.slDyn : (e.slDyn != null ? e.slDyn : e.sl);
-      if(d === 1 ? trail > cur : trail < cur){ bump(); ne.slDyn = trail; }
-    }
-    if(mut){ changed = true; return ne; }
     return e;
   });
   return changed ? out : null;

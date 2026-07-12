@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { aiPrompt, buildAiContext, callClaude, callGemini, tolerantJson } from '../ai/index.js';
-import { backtestEngine, walkForward } from '../backtest/engine.js';
+import { backtestEngine, walkForwardKFold } from '../backtest/engine.js';
 import { riskStatus } from '../signals/riskEngine.js';
-import { Store } from '../core/store.js';
+import { Store, modelKey, mergeSamples } from '../core/store.js';
 import { ChartCanvas } from '../components/ChartCanvas.jsx';
 import { EquityLine } from '../components/EquityLine.jsx';
 import { IC, Ic } from '../components/icons.jsx';
@@ -11,11 +11,12 @@ import { Net } from '../core/net.js';
 import { CAP_MAP, capEnabled, capResolveEpic, capWsStart, capWsStop, capitalTick } from '../data/capital.js';
 import { TF_SEC, getChart, htfTrend } from '../data/feed.js';
 import { TFS } from '../data/yahoo.js';
-import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
+import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, hasVolume, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
 import { detectPatterns } from '../patterns/index.js';
 import { computeSignal } from '../signals/engine.js';
 import { displacement } from '../smc/index.js';
 import { fmtClock, fmtFull, fmtPct, fmtPrice, fmtVol } from '../utils/format.js';
+import { fmtPips, signedPips, toPips } from '../constants/instruments.js';
 import { notifyUser } from '../utils/notify.js';
 
 export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJournal, journal, resolveTick }){
@@ -170,7 +171,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     }
     return out;
   }, [closes]);
-  const hasVol = useMemo(() => candlesSafe.some(c => c.v > 0), [candlesSafe]);
+  const hasVol = useMemo(() => hasVolume(candlesSafe), [candlesSafe]); // [M3] ≥60% świec + wariancja
 
   /* Faza 2: pakiet wskaźników */
   const ind = useMemo(() => {
@@ -266,9 +267,14 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     srWithHtf.__waitPullback = !!prefs.waitPullback;
     srWithHtf.__sym = item.sym;
     srWithHtf.__smc = prefs.smc || null;
-    srWithHtf.__weights = Store.get('rt_model_weights', null);
-    srWithHtf.__calib = Store.get('rt_model_calib', null);
-    srWithHtf.__knn = Store.get('rt_knn_history', null);
+    /* [C1] model PER instrument×TF — fallback: brak modelu → DEFAULT_WEIGHTS.
+       NIGDY nie używamy modelu innej pary. [C3] engine sam zdecyduje, czy
+       zastosować wyuczone wagi (tylko gdy reliable), inaczej DEFAULT_WEIGHTS. */
+    const mMeta = Store.get(modelKey('meta', item.sym, tf.id), null);
+    srWithHtf.__weights = Store.get(modelKey('weights', item.sym, tf.id), null);
+    srWithHtf.__calib = Store.get(modelKey('calib', item.sym, tf.id), null);
+    srWithHtf.__knn = Store.get(modelKey('knn', item.sym, tf.id), null);
+    srWithHtf.__reliable = !!(mMeta && mMeta.reliable);
     if(prefs.minProb != null) srWithHtf.__minProb = prefs.minProb;
     return computeSignal(candlesSafe, ind, emaData, patterns, hasVol, null, srWithHtf);
   }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.minProb, prefs.waitPullback, prefs.smc, item.sym, wv]);
@@ -278,6 +284,13 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     if(!ops || !ops.length) return null;
     return ops.find(o => o.kind !== 'signal-now') || null;
   }, [signal]);
+
+  /* [M5] stan ryzyka konta (kill-switch) — blokuje OTWIERANIE nowych pozycji;
+     zarządzanie otwartymi działa normalnie (nie blokujemy wyjść). */
+  const riskState = useMemo(
+    () => riskStatus(journal, { maxDailyLossR: prefs.maxDailyLossR, maxConsecLoss: prefs.maxConsecLoss }),
+    [journal, prefs.maxDailyLossR, prefs.maxConsecLoss]
+  );
 
   const sigLevels = useMemo(() => {
     const out = [];
@@ -409,12 +422,27 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     Bus.show('⏳ LIMIT ' + (dir > 0 ? 'LONG' : 'SHORT') + ' @ ' + fmtPrice(entry) + ' — czeka na dojście ceny (ważne 12 h)');
   };
 
-  const openTicket = (dir) => {
+  const openTicket = async (dir) => {
     if(!candlesSafe.length){
       Bus.show('Poczekaj na dane');
       return;
     }
-    const px = data.price != null ? data.price : candlesSafe[candlesSafe.length-1].c;
+    /* WEJŚCIE PO AKTUALNEJ CENIE: bez trybu AUTO `data.price` zostaje na zamknięciu
+       ostatniej świecy (cena „zaniżona"/nieaktualna). Przy każdym kliknięciu KUP/
+       SPRZEDAJ pobieramy ŚWIEŻY tick z Capital.com (jeśli LIVE dostępny), żeby
+       pozycja była otwierana po realnej bieżącej cenie, a nie po świecy. */
+    let px = data.price != null ? data.price : candlesSafe[candlesSafe.length-1].c;
+    let liveEntry = false;
+    if(capEnabled() && CAP_MAP[item.sym]){
+      try{
+        /* wyścig z krótkim timeoutem — modal nie może zawisnąć, gdy Capital wolno odpowiada */
+        const t = await Promise.race([
+          capitalTick(item.sym),
+          new Promise(r => setTimeout(() => r(null), 2500)),
+        ]);
+        if(t && t.px != null){ px = t.px; liveEntry = true; }
+      }catch(e){}
+    }
     let a = null;
     if(ind && ind.atr){
       for(let q=ind.atr.length-1;q>=0;q--){ if(ind.atr[q] != null){ a = ind.atr[q]; break; } }
@@ -428,8 +456,37 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       tp1 = dir === 1 ? px + a*1.65 : px - a*1.65;
       tp2 = dir === 1 ? px + a*2.75 : px - a*2.75;
     }
-    setTicket({ dir, entry:px, sl:fmtPrice(sl), tp1:fmtPrice(tp1), tp2:fmtPrice(tp2) });
+    /* [tryb AUTO] bez okna akceptacji: KUP/SPRZEDAJ od razu otwiera pozycję paper
+       z automatycznym SL/TP po AKTUALNEJ cenie. Kill-switch konta obowiązuje. */
+    if(prefs.quickTrade){
+      if(riskState.blocked){ Bus.show('⛔ Stop dnia: ' + riskState.reason + ' — nowe pozycje zablokowane'); return; }
+      if(journal.some(e => e.paper && (e.result === 'open' || e.result === 'pending') && e.sym === item.sym)){
+        Bus.show('Masz już otwartą/oczekującą pozycję na ' + item.sym); return;
+      }
+      addJournal(makePaper(dir, px, sl, tp1, tp2, 'manual', null));
+      Bus.show('▶ ' + (dir > 0 ? 'KUP' : 'SPRZEDAJ') + ' otwarte @ ' + fmtPrice(px) + (liveEntry ? ' · LIVE' : '') + ' (auto SL/TP)');
+      return;
+    }
+    setTicket({ dir, entry:px, sl:fmtPrice(sl), tp1:fmtPrice(tp1), tp2:fmtPrice(tp2), live:liveEntry });
   };
+
+  /* [ticket] ENTRY ZABLOKOWANE i odczytywane z wykresu NA BIEŻĄCO: pole wejścia
+     nie jest edytowalne, a pokazywana cena śledzi żywy wykres. */
+  useEffect(() => {
+    if(ticket && data.price != null){
+      setTicket(t => (t && t.entry !== data.price) ? { ...t, entry: data.price, live: !!data.live } : t);
+    }
+  }, [data.price]);
+  /* dodatkowy poll żywej ceny, gdy tryb AUTO jest wyłączony (Capital LIVE) */
+  useEffect(() => {
+    if(!ticket) return;
+    if(!(capEnabled() && CAP_MAP[item.sym])) return;
+    let alive = true;
+    const h = setInterval(async () => {
+      try{ const tk = await capitalTick(item.sym); if(alive && tk && tk.px != null) setTicket(t => t ? { ...t, entry: tk.px, live: true } : t); }catch(e){}
+    }, 2000);
+    return () => { alive = false; clearInterval(h); };
+  }, [!!ticket, item.sym]);
 
   /* Faza 6: alert przy nowym sygnale (przy włączonym AUTO) */
   useEffect(() => {
@@ -458,14 +515,16 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     const eqTag = eq ? (eq.good ? ' ✓przy strefie' : eq.chase ? ' ⚠gonienie' : '') : '';
     const msg = (strong ? '★ ' : '') + item.sym + ' ' + tf.label + ': ' + dtxt
       + ' (' + (signal.score > 0 ? '+' : '') + signal.score + htfTag + eqTag + ')'
-      + (signal.levels ? ' · SL ' + fmtPrice(signal.levels.sl) + ' · TP1 ' + fmtPrice(signal.levels.tp1) : '');
+      + (signal.levels ? ' · wejście ' + fmtPrice(signal.levels.entry) + ' (0)'
+          + ' · SL ' + signedPips(item.sym, signal.levels.sl - signal.levels.entry)
+          + ' · TP1 ' + signedPips(item.sym, signal.levels.tp1 - signal.levels.entry) : '');
     if(prefs.alert){
       notifyUser('Rikipo Trader — ' + (strong ? 'MOCNY sygnał ' : 'sygnał ') + dtxt, msg);
       Bus.show((strong ? '🔥 ' : '⚡ ') + msg);
     }
     if(prefs.autoTrade && signal.levels && !journal.some(e => e.paper && e.result === 'open' && e.sym === item.sym)){
-      /* Risk Engine: kill-switch blokuje AUTOMAT (dzienny limit / seria strat) */
-      const rs = riskStatus(journal);
+      /* Risk Engine: kill-switch blokuje AUTOMAT (dzienny limit / seria strat) [M5] */
+      const rs = riskStatus(journal, { maxDailyLossR: prefs.maxDailyLossR, maxConsecLoss: prefs.maxConsecLoss });
       if(rs.blocked){
         Bus.show('🛑 Kill-switch: ' + rs.reason + ' — auto-trade wstrzymany');
       } else {
@@ -485,7 +544,9 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const priceColor = pct == null ? 'var(--text)' : up ? 'var(--up)' : 'var(--down)';
 
   return (
-    <div className="screen" style={{overflow:'hidden'}}>
+    /* [fix] usunięte inline overflow:hidden — blokowało PRZEWIJANIE całego
+       ekranu wykresu; .screen ma overflow-y:auto, wykres łapie tylko pan-y */
+    <div className="screen">
       <div className="topbar" style={{paddingBottom:4}}>
         <button className="iconbtn" onClick={onBack}><Ic d={IC.back} size={20} /></button>
         <div style={{minWidth:0}}>
@@ -597,10 +658,10 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
               background: signal.dir > 0 ? '#2fd6ae' : signal.dir < 0 ? '#ff6b5e' : '#8fb0ac'}} />
           </span>
           <span className="sig-meta mono" style={{color:'var(--dim)'}}>
-            {signal.setupScore != null ? 'P(win) ' + signal.setupScore + '%' + (signal.ev != null ? ' · EV ' + (signal.ev>0?'+':'') + signal.ev + 'R' : '') : 'confluence ' + (signal.score > 0 ? '+' : '') + signal.score}
+            {signal.setupScore != null ? (signal.probCalibrated ? 'P(win) ' + signal.setupScore + '%' : 'score (niekalibr.) ' + signal.setupScore) + (signal.ev != null ? ' · EV ' + (signal.ev>0?'+':'') + signal.ev + 'R' : '') : 'confluence ' + (signal.score > 0 ? '+' : '') + signal.score}
             <br/>
             {signal.dir !== 0 && signal.levels
-              ? 'SL ' + fmtPrice(signal.levels.sl) + ' · TP1 ' + fmtPrice(signal.levels.tp1)
+              ? 'Wejście ' + fmtPrice(signal.levels.entry) + ' (0) · SL ' + signedPips(item.sym, signal.levels.sl - signal.levels.entry) + ' · TP1 ' + signedPips(item.sym, signal.levels.tp1 - signal.levels.entry)
               : 'brak przewagi (EV/prob poniżej progu)'}
           </span>
           {signal.dir !== 0 && signal.entryQuality && (
@@ -651,7 +712,10 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 {op.note ? (op.factors && op.factors.length ? ' — ' : '') + op.note : ''}
               </div>
             )}
-            {op.entry != null && op.grade !== 'D' && op.state !== 'ready' && op.state !== 'in_zone'
+            {/* zlecenie LIMIT (paper) dostępne na KAŻDYM interwale — wcześniej znikało
+                na niższych TF, bo cena zwykle jest już „w strefie" (state in_zone/ready).
+                Zdejmujemy to wykluczenie: LIMIT działa tak samo jak na H1 na wszystkich TF. */}
+            {op.entry != null && op.grade !== 'D'
               && !journal.some(e => e.paper && (e.result === 'open' || e.result === 'pending') && e.sym === item.sym) && (
               <button className="chip mono" onClick={(ev) => { ev.stopPropagation(); armLimit(op); }}
                 style={{justifyContent:'center', padding:'8px 0', fontSize:12, fontWeight:800, color:'var(--ema9)', borderColor:'rgba(255,201,77,.5)', background:'rgba(255,201,77,.08)'}}>
@@ -663,15 +727,26 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       })()}
 
       {candlesSafe.length > 0 && (
-        <div style={{display:'flex', gap:8, margin:'4px 16px 2px'}}>
-          <button className="chip mono" style={{flex:1, justifyContent:'center', padding:'10px 0', fontWeight:800, color:'var(--up)', borderColor:'rgba(47,214,174,.5)', background:'rgba(47,214,174,.08)'}}
-            onClick={() => openTicket(1)}>▲ KUP · paper</button>
-          <button className="chip mono" style={{flex:1, justifyContent:'center', padding:'10px 0', fontWeight:800, color:'var(--down)', borderColor:'rgba(255,107,94,.5)', background:'rgba(255,107,94,.08)'}}
-            onClick={() => openTicket(-1)}>▼ SPRZEDAJ · paper</button>
+        <div style={{margin:'4px 16px 2px'}}>
+          {/* przełącznik: szybkie wejście (bez akceptacji, auto SL/TP) ⟷ okno zlecenia */}
+          <div style={{display:'flex', alignItems:'center', justifyContent:'flex-end', gap:8, marginBottom:6}}>
+            <span style={{fontSize:11, color:'var(--dim2)'}}>tryb wejścia:</span>
+            <button className={'chip mono' + (prefs.quickTrade ? ' sel' : '')}
+              onClick={() => setPrefs(p => { const nv = !p.quickTrade; Bus.show(nv ? '⚡ Szybkie wejście: KUP/SPRZEDAJ otwiera OD RAZU (auto SL/TP, bez akceptacji)' : '📝 Okno zlecenia: potwierdzasz i ustawiasz SL/TP'); return { ...p, quickTrade:nv }; })}
+              style={{padding:'4px 10px', fontSize:11, fontWeight:800, color: prefs.quickTrade ? 'var(--ema9)' : 'var(--dim)', borderColor: prefs.quickTrade ? 'rgba(255,201,77,.5)' : 'var(--border2)'}}>
+              {prefs.quickTrade ? '⚡ SZYBKIE (bez akceptacji)' : '📝 OKNO ZLECENIA'}
+            </button>
+          </div>
+          <div style={{display:'flex', gap:8}}>
+            <button className="chip mono" style={{flex:1, justifyContent:'center', padding:'10px 0', fontWeight:800, color:'var(--up)', borderColor:'rgba(47,214,174,.5)', background:'rgba(47,214,174,.08)'}}
+              onClick={() => openTicket(1)}>▲ KUP · paper</button>
+            <button className="chip mono" style={{flex:1, justifyContent:'center', padding:'10px 0', fontWeight:800, color:'var(--down)', borderColor:'rgba(255,107,94,.5)', background:'rgba(255,107,94,.08)'}}
+              onClick={() => openTicket(-1)}>▼ SPRZEDAJ · paper</button>
+          </div>
         </div>
       )}
 
-      <div style={{flex:1, display:'flex', flexDirection:'column', position:'relative', minHeight:280}}>
+      <div className="chartArea">
         <ChartCanvas
           key={item.sym + '|' + tf.id}
           candles={candlesSafe}
@@ -766,7 +841,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
 
             {signal.setupScore != null && (
               <div style={{display:'flex', gap:6, marginBottom:8, flexWrap:'wrap'}}>
-                <span className="mono" style={{fontSize:11, fontWeight:800, padding:'3px 8px', borderRadius:7, background: signal.setupScore>=66?'rgba(47,214,174,.15)':signal.setupScore>=52?'rgba(255,201,77,.15)':'rgba(143,176,172,.1)', color: signal.setupScore>=66?'var(--up)':signal.setupScore>=52?'var(--ema9)':'var(--dim)'}}>P(win) {signal.setupScore}%</span>
+                <span className="mono" style={{fontSize:11, fontWeight:800, padding:'3px 8px', borderRadius:7, background: signal.setupScore>=66?'rgba(47,214,174,.15)':signal.setupScore>=52?'rgba(255,201,77,.15)':'rgba(143,176,172,.1)', color: signal.setupScore>=66?'var(--up)':signal.setupScore>=52?'var(--ema9)':'var(--dim)'}}>{signal.probCalibrated ? 'P(win) ' + signal.setupScore + '%' : 'score ' + signal.setupScore + ' (niekalibr.)'}</span>
                 {signal.ev != null && <span className="mono" style={{fontSize:11, fontWeight:700, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border2)', color: signal.ev>0?'var(--up)':'var(--down)'}}>EV {signal.ev>0?'+':''}{signal.ev}R</span>}
                 {signal.regime && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color:'var(--dim)'}}>{signal.regime.type} · ADX {signal.regime.adx}</span>}
                 {signal.sizing && signal.dir !== 0 && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color:'var(--dim)'}}>ryzyko {signal.sizing.riskPct}%</span>}
@@ -790,8 +865,8 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       <b>{lbl}{extra ? ' · ' + extra : ''}</b>
                       <span className="mono" style={{color:col, fontWeight:700}}>
                         {fmtPrice(p)}
-                        <span style={{color:'var(--dim2)', fontWeight:500}}>
-                          {'  (' + (p >= signal.levels.entry ? '+' : '−') + fmtPrice(Math.abs(p - signal.levels.entry)) + ')'}
+                        <span style={{color: lbl === 'Wejście' ? 'var(--dim2)' : (p >= signal.levels.entry ? 'var(--up)' : 'var(--down)'), fontWeight:700}}>
+                          {lbl === 'Wejście' ? '  (0 pip)' : '  (' + signedPips(item.sym, p - signal.levels.entry) + ')'}
                         </span>
                       </span>
                     </div>
@@ -799,7 +874,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   <div className="kv">
                     <b>Ryzyko (do SL)</b>
                     <span className="mono" style={{color:'var(--dim)'}}>
-                      {fmtPrice(signal.levels.slDist)} pkt · {(signal.levels.slDist/signal.levels.entry*100).toFixed(2)}% · {(signal.levels.slDist/signal.atr).toFixed(1)}×ATR
+                      {fmtPips(item.sym, signal.levels.slDist)} · {(signal.levels.slDist/signal.levels.entry*100).toFixed(2)}% · {(signal.levels.slDist/signal.atr).toFixed(1)}×ATR
                     </span>
                   </div>
                 </div>
@@ -810,7 +885,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   borderRadius:12, padding:'10px 12px', marginBottom:10,
                   fontSize:13, color:'var(--dim)', lineHeight:1.6,
                 }}>
-                  Brak wejścia: P(win) {signal.setupScore != null ? signal.setupScore + '%' : '—'}
+                  Brak wejścia: {signal.probCalibrated ? 'P(win) ' : 'score (niekalibr.) '}{signal.setupScore != null ? signal.setupScore + (signal.probCalibrated ? '%' : '') : '—'}
                   {signal.ev != null ? ' · EV ' + (signal.ev > 0 ? '+' : '') + signal.ev + 'R' : ''}
                   {signal.evBlock ? ' — poniżej progu oczekiwanej wartości' : ''}.
                   Model nie widzi tu dodatniej przewagi (EV) — zgodnie z zasadą: brak edge = brak transakcji.
@@ -1012,9 +1087,14 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
               <span className="mono" style={{color:'var(--dim)', fontSize:12}}>{item.sym} · paper</span>
               <span className="spacer" />
               <span className="mono" style={{fontSize:14, fontWeight:800}}>@ {fmtPrice(ticket.entry)}</span>
+              {ticket.live
+                ? <span className="mono" style={{fontSize:10, fontWeight:800, color:'var(--up)'}}>● LIVE 🔒</span>
+                : <span className="mono" style={{fontSize:10, color:'var(--ema9)'}}>feed ~15 min 🔒</span>}
             </div>
             <div style={{fontSize:11, color:'var(--dim2)', marginBottom:10, lineHeight:1.5}}>
-              Wirtualne zlecenie po cenie rynkowej — rozliczy się automatycznie po żywych notowaniach (SL / TP1 / TP2).
+              Wejście <b style={{color:'var(--text)'}}>zablokowane</b> — cena czytana z wykresu na bieżąco
+              ({ticket.live ? 'LIVE Capital.com' : 'darmowy feed, opóźnienie ~15 min — włącz Capital LIVE w INFO'}).
+              Ustawiasz tylko SL / TP; rozliczenie automatyczne po żywych notowaniach.
             </div>
             {[['sl','Stop Loss'],['tp1','Take Profit 1'],['tp2','Take Profit 2']].map(([k, l]) => (
               <div key={k} style={{marginBottom:9}}>
@@ -1026,18 +1106,33 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
               </div>
             ))}
             {(() => {
-              const sl = parseFloat(ticket.sl), t1 = parseFloat(ticket.tp1);
+              const sl = parseFloat(ticket.sl), t1 = parseFloat(ticket.tp1), t2 = parseFloat(ticket.tp2);
               const risk = isFinite(sl) ? Math.abs(ticket.entry - sl) : null;
               const rr = (risk && isFinite(t1)) ? Math.abs(t1 - ticket.entry)/risk : null;
               return (
-                <div className="mono" style={{fontSize:11.5, color:'var(--dim)', margin:'2px 0 10px'}}>
-                  ryzyko: {risk ? fmtPrice(risk) + ' pkt' : '—'} · RR do TP1: {rr ? '1:' + rr.toFixed(2) : '—'}
-                  {rr != null && rr < 1.5 ? <span style={{color:'var(--ema9)'}}> · poniżej Twojej zasady 1:1.5!</span> : null}
+                <div style={{margin:'2px 0 10px'}}>
+                  {/* pipsy względem wejścia (0) */}
+                  <div className="mono" style={{fontSize:12, marginBottom:3}}>
+                    <span style={{color:'var(--dim2)'}}>wejście {fmtPrice(ticket.entry)} (0) · </span>
+                    {isFinite(sl) && <span style={{color:'var(--down)', fontWeight:700}}>SL {signedPips(item.sym, sl - ticket.entry)}</span>}
+                    {isFinite(t1) && <span style={{color:'var(--up)', fontWeight:700}}>{'  ·  TP1 ' + signedPips(item.sym, t1 - ticket.entry)}</span>}
+                    {isFinite(t2) && <span style={{color:'var(--up)', fontWeight:600}}>{'  ·  TP2 ' + signedPips(item.sym, t2 - ticket.entry)}</span>}
+                  </div>
+                  <div className="mono" style={{fontSize:11.5, color:'var(--dim)'}}>
+                    ryzyko: {risk ? fmtPips(item.sym, risk) : '—'} · RR do TP1: {rr ? '1:' + rr.toFixed(2) : '—'}
+                    {rr != null && rr < 1.5 ? <span style={{color:'var(--ema9)'}}> · poniżej Twojej zasady 1:1.5!</span> : null}
+                  </div>
                 </div>
               );
             })()}
-            <button className="chip sel mono" style={{width:'100%', justifyContent:'center', padding:'12px', fontSize:14}}
+            {riskState.blocked && (
+              <div className="mono" style={{fontSize:11, color:'var(--down)', marginBottom:6}}>⛔ Stop dnia: {riskState.reason} — nowe pozycje zablokowane (zarządzanie otwartymi działa).</div>
+            )}
+            <button className="chip sel mono" disabled={riskState.blocked}
+              title={riskState.blocked ? ('Stop dnia: ' + riskState.reason) : ''}
+              style={{width:'100%', justifyContent:'center', padding:'12px', fontSize:14, opacity: riskState.blocked ? 0.5 : 1, cursor: riskState.blocked ? 'not-allowed' : 'pointer'}}
               onClick={() => {
+                if(riskState.blocked){ Bus.show('⛔ Stop dnia: ' + riskState.reason); return; }
                 const sl = parseFloat(ticket.sl), t1 = parseFloat(ticket.tp1), t2 = parseFloat(ticket.tp2);
                 if(!isFinite(sl) || !isFinite(t1)){ Bus.show('Podaj poprawne SL i TP1'); return; }
                 const d = ticket.dir;
@@ -1048,7 +1143,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 addJournal(makePaper(d, ticket.entry, sl, t1, isFinite(t2) ? t2 : null, 'manual', null));
                 Bus.show('▶ Pozycja paper otwarta @ ' + fmtPrice(ticket.entry));
                 setTicket(null);
-              }}>Otwórz pozycję (paper)</button>
+              }}>{riskState.blocked ? '⛔ Otwieranie zablokowane (stop dnia)' : 'Otwórz pozycję (paper)'}</button>
           </div>
         </div>
       )}
@@ -1070,8 +1165,12 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   }
                   setBt({ busy:true, res:null });
                   setTimeout(() => {
+                    const mMeta = Store.get(modelKey('meta', item.sym, tf.id), null);
+                    const rel = !!(mMeta && mMeta.reliable);
                     const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc,
-                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
+                      { weights: rel ? Store.get(modelKey('weights', item.sym, tf.id), null) : null,
+                        calib: rel ? Store.get(modelKey('calib', item.sym, tf.id), null) : null,
+                        knn: rel ? Store.get(modelKey('knn', item.sym, tf.id), null) : null, tfId: tf.id });
                     setBt({ busy:false, res:r });
                   }, 40);
                 }}>
@@ -1083,34 +1182,51 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   if(bt.busy || !ind || candlesSafe.length < 250){ if(!bt.busy) Bus.show('Do treningu wag trzeba ≥250 świec (zmień interwał na większy zakres)'); return; }
                   setBt({ busy:true, res:null });
                   setTimeout(() => {
-                    const wf = walkForward(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, tf.id);
+                    /* [C3] bufor między-sesyjny: łączymy świeżo policzone próbki
+                       ze zbuforowanymi (dedup po ts+i0), by próba rosła w czasie. */
+                    const bufKey = 'rt_samples_' + item.sym + '_' + tf.id;
+                    const prior = Store.get(bufKey, []);
+                    const wf = walkForwardKFold(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, tf.id, { K:5, priorSamples: prior });
                     if(wf && wf.ok){
-                      Store.set('rt_model_weights', wf.weights);
-                      Store.set('rt_model_calib', wf.calib || null);
-                      Store.set('rt_knn_history', wf.samples && wf.samples.length >= 40 ? wf.samples : null);
-                      Store.set('rt_model_meta', { n: wf.training.n, reliable: !!wf.reliable, oosBrier: wf.oosBrier, at: Date.now() });
+                      const mk = (kind) => modelKey(kind, item.sym, tf.id);
+                      /* [C1] zapis PER instrument×TF. [C3] kalibracja/kNN tylko gdy reliable. */
+                      Store.set(mk('weights'), wf.weights);
+                      Store.set(mk('calib'), wf.reliable ? (wf.calib || null) : null);
+                      Store.set(mk('knn'), (wf.reliable && wf.samples && wf.samples.length >= 40) ? wf.samples : null);
+                      Store.set(mk('meta'), { n: wf.training.n, reliable: !!wf.reliable, totalNoos: wf.totalNoos,
+                        avgRmed: wf.agg.avgR.med, brierP75: wf.agg.brier.p75, sym:item.sym, tf:tf.id, at: Date.now() });
+                      /* [C3] dopisz nowe próbki do bufora (cap 2000, FIFO, dedup ts+i0) */
+                      const nowTs = candlesSafe.length ? candlesSafe[candlesSafe.length-1].t : Date.now();
+                      const fresh = wf.samples.map(s => ({ x:s.x, y:s.y, i0:s.i0, i1:s.i1,
+                        ts: (candlesSafe[s.i0] && candlesSafe[s.i0].t) || nowTs, sym:item.sym, tf:tf.id }));
+                      Store.set(bufKey, mergeSamples(prior, fresh, 2000));
                       setWv(v => v + 1);
-                      Bus.show('🧠 OOS: ' + (wf.outSample.n||0) + ' tr · PF ' + (wf.outSample.pf||0) + ' · ' + (wf.outSample.avgR||0) + 'R'
-                        + (wf.oosBrier != null ? ' · Brier ' + wf.oosBrier : '')
-                        + (wf.reliable ? '' : ' · ⚠ MAŁA PRÓBA (n=' + wf.training.n + ') — nie ufaj tym wagom'));
+                      const a = wf.agg;
+                      Bus.show('🧠 OOS k=' + wf.K + ' · avgR med ' + a.avgR.med + ' (IQR ' + a.avgR.p25 + '–' + a.avgR.p75 + ')'
+                        + ' · Brier med ' + (a.brier.med != null ? a.brier.med : '—') + ' · n=' + wf.totalNoos
+                        + ' · ' + (wf.reliable ? '✓ wiarygodne' : '⚠ NIEwiarygodne (wagi zapisane, kalibracja/kNN WYŁ.)'));
                     } else {
                       Bus.show('Trening nieudany: ' + (wf ? wf.reason : 'brak danych'));
                     }
+                    const rel = !!(wf && wf.reliable);
                     const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc,
-                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
+                      { weights: rel ? Store.get(modelKey('weights', item.sym, tf.id), null) : null,
+                        calib: rel ? Store.get(modelKey('calib', item.sym, tf.id), null) : null,
+                        knn: rel ? Store.get(modelKey('knn', item.sym, tf.id), null) : null, tfId: tf.id });
                     r.wf = wf;
                     setBt({ busy:false, res:r });
                   }, 40);
                 }}>
-                🧠 Trenuj wagi z backtestu (walk-forward)
+                🧠 Trenuj wagi (k-fold walk-forward)
               </button>
-              {Store.get('rt_model_weights', null) && (() => {
-                const meta = Store.get('rt_model_meta', null);
+              {Store.get(modelKey('weights', item.sym, tf.id), null) && (() => {
+                const meta = Store.get(modelKey('meta', item.sym, tf.id), null);
+                /* [C1] pokazujemy, dla której pary/TF jest załadowany model */
                 return (
                   <div style={{marginTop:6, fontSize:10.5, color: meta && !meta.reliable ? 'var(--ema9)' : 'var(--dim2)'}} className="mono">
-                    Model używa WYUCZONYCH wag{meta ? ' (n=' + meta.n + (meta.reliable ? ', wiarygodne' : ', ⚠ mała próba — traktuj jako eksperyment') + ')' : ''}.
+                    Model dla <b>{item.sym} · {tf.label}</b>{meta ? ' (n=' + meta.n + (meta.reliable ? ', wiarygodne — wagi/kalibracja/kNN AKTYWNE' : ', ⚠ NIEwiarygodne — używane DEFAULT_WEIGHTS') + ')' : ''}.
                     <button className="mono" style={{marginLeft:8, color:'var(--down)', background:'none', border:'none', textDecoration:'underline'}}
-                      onClick={() => { Store.set('rt_model_weights', null); Store.set('rt_model_calib', null); Store.set('rt_model_meta', null); setWv(v=>v+1); Bus.show('Przywrócono wagi domyślne'); }}>reset</button>
+                      onClick={() => { Store.del(modelKey('weights', item.sym, tf.id)); Store.del(modelKey('calib', item.sym, tf.id)); Store.del(modelKey('knn', item.sym, tf.id)); Store.del(modelKey('meta', item.sym, tf.id)); setWv(v=>v+1); Bus.show('Przywrócono wagi domyślne dla ' + item.sym + ' · ' + tf.label); }}>reset</button>
                   </div>
                 );
               })()}
@@ -1152,21 +1268,22 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       ))}
                     </React.Fragment>
                   )}
-                  {bt.res.wf && bt.res.wf.ok && (
+                  {bt.res.wf && bt.res.wf.ok && (() => { const a = bt.res.wf.agg; return (
                     <div style={{marginTop:12, background:'var(--bg)', border:'1px solid rgba(79,216,255,.3)', borderRadius:12, padding:'10px 12px'}}>
-                      <div className="section-label" style={{padding:'0 0 6px', color:'var(--cyan)'}}>Walk-forward (uczenie wag)</div>
-                      <div className="kv"><b>In-sample (trening 60%)</b><span className="mono">{bt.res.wf.inSample.n} tr · PF {bt.res.wf.inSample.pf} · {bt.res.wf.inSample.avgR}R</span></div>
-                      <div className="kv"><b>Out-of-sample (test 40%)</b><span className="mono" style={{color: (bt.res.wf.outSample.avgR||0) > 0 ? 'var(--up)' : 'var(--down)', fontWeight:700}}>{bt.res.wf.outSample.n||0} tr · PF {bt.res.wf.outSample.pf||0} · {bt.res.wf.outSample.avgR||0}R</span></div>
-                      <div className="kv"><b>Baseline (wagi domyślne)</b><span className="mono">{bt.res.wf.baseline ? bt.res.wf.baseline.n : '—'} tr · {bt.res.wf.baseline ? bt.res.wf.baseline.avgR : '—'}R</span></div>
-                      {bt.res.wf.oosBrier != null && (
-                        <div className="kv"><b>Brier OOS (kalibracja P)</b><span className="mono" style={{color: bt.res.wf.oosBrier < 0.24 ? 'var(--up)' : 'var(--ema9)'}}>{bt.res.wf.oosBrier}<span style={{color:'var(--dim2)', fontWeight:500}}> (0.25 = moneta)</span></span></div>
-                      )}
-                      {!bt.res.wf.reliable && (
-                        <div style={{fontSize:10.5, color:'var(--ema9)', marginTop:5, lineHeight:1.55}}>⚠ Próba treningowa n={bt.res.wf.training.n} &lt; 150 lub OOS &lt; 30 transakcji — wynik statystycznie SŁABY. Traktuj jako eksperyment, nie dowód.</div>
-                      )}
-                      <div style={{fontSize:10.5, color:'var(--dim2)', marginTop:5, lineHeight:1.55}}>OOS to jedyny uczciwy dowód przewagi. Jeśli OOS PF ≤ 1 lub avgR ≤ 0 — model NIE ma edge na tym instrumencie; nie ufaj wyuczonym wagom. Trening z embargo (bez przecieku etykiet przez granicę splitu), HTF liczony identycznie jak live.</div>
+                      {/* [C2] raport k-fold: mediana + IQR zamiast pojedynczego splitu */}
+                      <div className="section-label" style={{padding:'0 0 6px', color:'var(--cyan)'}}>Walk-forward k-fold (K={bt.res.wf.K}, purged)</div>
+                      <div className="kv"><b>OOS avgR</b><span className="mono" style={{color: (a.avgR.med||0) > 0 ? 'var(--up)' : 'var(--down)', fontWeight:700}}>med {a.avgR.med} · IQR {a.avgR.p25}–{a.avgR.p75}</span></div>
+                      <div className="kv"><b>OOS PF</b><span className="mono">med {a.pf.med} · IQR {a.pf.p25}–{a.pf.p75}</span></div>
+                      <div className="kv"><b>OOS win%</b><span className="mono">med {a.winRate.med}% · IQR {a.winRate.p25}–{a.winRate.p75}</span></div>
+                      <div className="kv"><b>OOS Brier</b><span className="mono" style={{color: (a.brier.p75!=null && a.brier.p75 < 0.25) ? 'var(--up)' : 'var(--ema9)'}}>med {a.brier.med != null ? a.brier.med : '—'} · 75-pct {a.brier.p75 != null ? a.brier.p75 : '—'} <span style={{color:'var(--dim2)', fontWeight:500}}>(0.25 = moneta)</span></span></div>
+                      <div className="kv"><b>Łączny n_oos</b><span className="mono" style={{color: bt.res.wf.totalNoos >= 100 ? 'var(--up)' : 'var(--ema9)'}}>{bt.res.wf.totalNoos}</span></div>
+                      <div className="kv"><b>Baseline (domyślne)</b><span className="mono">{bt.res.wf.baseline ? bt.res.wf.baseline.n : '—'} tr · {bt.res.wf.baseline ? bt.res.wf.baseline.avgR : '—'}R</span></div>
+                      <div style={{marginTop:6, fontSize:12, fontWeight:800, color: bt.res.wf.reliable ? 'var(--up)' : 'var(--down)'}}>
+                        {bt.res.wf.reliable ? '✓ WIARYGODNE — wagi, kalibracja i kNN aktywne' : '⚠ NIEWIARYGODNE — wagi zapisane, ale kalibracja i kNN WYŁĄCZONE (tor decyzyjny używa DEFAULT_WEIGHTS)'}
+                      </div>
+                      <div style={{fontSize:10.5, color:'var(--dim2)', marginTop:5, lineHeight:1.55}}>Kryterium wiarygodności: łączny n_oos ≥ 100 ORAZ mediana avgR &gt; 0 ORAZ 75-pct Brier &lt; 0.25. K przesuwanych okien z embargo + purging (López de Prado): próbki nachodzące na okno testowe są usuwane z treningu. Metryki liczone WYŁĄCZNIE na OOS; wagi produkcyjne trenowane osobno na całości.</div>
                     </div>
-                  )}
+                  ); })()}
                   <div style={{marginTop:12, fontSize:11, color:'var(--dim2)', lineHeight:1.65}}>
                     Metodologia: wejście po close świecy sygnału · <b style={{color:'var(--dim)'}}>dynamiczne zarządzanie</b>:
                     po +1R stop przesuwany na wejście (BE), na TP1 realizacja 50% pozycji, reszta („runner")
