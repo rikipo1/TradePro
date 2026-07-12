@@ -544,7 +544,9 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const priceColor = pct == null ? 'var(--text)' : up ? 'var(--up)' : 'var(--down)';
 
   return (
-    <div className="screen" style={{overflow:'hidden'}}>
+    /* [fix] usunięte inline overflow:hidden — blokowało PRZEWIJANIE całego
+       ekranu wykresu; .screen ma overflow-y:auto, wykres łapie tylko pan-y */
+    <div className="screen">
       <div className="topbar" style={{paddingBottom:4}}>
         <button className="iconbtn" onClick={onBack}><Ic d={IC.back} size={20} /></button>
         <div style={{minWidth:0}}>
