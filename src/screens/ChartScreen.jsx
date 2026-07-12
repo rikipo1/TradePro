@@ -16,7 +16,7 @@ import { detectPatterns } from '../patterns/index.js';
 import { computeSignal } from '../signals/engine.js';
 import { displacement } from '../smc/index.js';
 import { fmtClock, fmtFull, fmtPct, fmtPrice, fmtVol } from '../utils/format.js';
-import { fmtPips, toPips } from '../constants/instruments.js';
+import { fmtPips, signedPips, toPips } from '../constants/instruments.js';
 import { notifyUser } from '../utils/notify.js';
 
 export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJournal, journal, resolveTick }){
@@ -515,8 +515,9 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     const eqTag = eq ? (eq.good ? ' ✓przy strefie' : eq.chase ? ' ⚠gonienie' : '') : '';
     const msg = (strong ? '★ ' : '') + item.sym + ' ' + tf.label + ': ' + dtxt
       + ' (' + (signal.score > 0 ? '+' : '') + signal.score + htfTag + eqTag + ')'
-      + (signal.levels ? ' · SL ' + fmtPrice(signal.levels.sl) + ' (' + fmtPips(item.sym, signal.levels.sl - signal.levels.entry) + ')'
-          + ' · TP1 ' + fmtPrice(signal.levels.tp1) + ' (' + fmtPips(item.sym, signal.levels.tp1 - signal.levels.entry) + ')' : '');
+      + (signal.levels ? ' · wejście ' + fmtPrice(signal.levels.entry) + ' (0)'
+          + ' · SL ' + signedPips(item.sym, signal.levels.sl - signal.levels.entry)
+          + ' · TP1 ' + signedPips(item.sym, signal.levels.tp1 - signal.levels.entry) : '');
     if(prefs.alert){
       notifyUser('Rikipo Trader — ' + (strong ? 'MOCNY sygnał ' : 'sygnał ') + dtxt, msg);
       Bus.show((strong ? '🔥 ' : '⚡ ') + msg);
@@ -658,7 +659,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
             {signal.setupScore != null ? (signal.probCalibrated ? 'P(win) ' + signal.setupScore + '%' : 'score (niekalibr.) ' + signal.setupScore) + (signal.ev != null ? ' · EV ' + (signal.ev>0?'+':'') + signal.ev + 'R' : '') : 'confluence ' + (signal.score > 0 ? '+' : '') + signal.score}
             <br/>
             {signal.dir !== 0 && signal.levels
-              ? 'SL ' + fmtPrice(signal.levels.sl) + ' (' + fmtPips(item.sym, signal.levels.sl - signal.levels.entry) + ') · TP1 ' + fmtPrice(signal.levels.tp1) + ' (' + fmtPips(item.sym, signal.levels.tp1 - signal.levels.entry) + ')'
+              ? 'Wejście ' + fmtPrice(signal.levels.entry) + ' (0) · SL ' + signedPips(item.sym, signal.levels.sl - signal.levels.entry) + ' · TP1 ' + signedPips(item.sym, signal.levels.tp1 - signal.levels.entry)
               : 'brak przewagi (EV/prob poniżej progu)'}
           </span>
           {signal.dir !== 0 && signal.entryQuality && (
@@ -862,8 +863,8 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       <b>{lbl}{extra ? ' · ' + extra : ''}</b>
                       <span className="mono" style={{color:col, fontWeight:700}}>
                         {fmtPrice(p)}
-                        <span style={{color:'var(--dim2)', fontWeight:500}}>
-                          {lbl === 'Wejście' ? '' : '  (' + (p >= signal.levels.entry ? '+' : '−') + fmtPips(item.sym, p - signal.levels.entry) + ')'}
+                        <span style={{color: lbl === 'Wejście' ? 'var(--dim2)' : (p >= signal.levels.entry ? 'var(--up)' : 'var(--down)'), fontWeight:700}}>
+                          {lbl === 'Wejście' ? '  (0 pip)' : '  (' + signedPips(item.sym, p - signal.levels.entry) + ')'}
                         </span>
                       </span>
                     </div>
@@ -1103,13 +1104,22 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
               </div>
             ))}
             {(() => {
-              const sl = parseFloat(ticket.sl), t1 = parseFloat(ticket.tp1);
+              const sl = parseFloat(ticket.sl), t1 = parseFloat(ticket.tp1), t2 = parseFloat(ticket.tp2);
               const risk = isFinite(sl) ? Math.abs(ticket.entry - sl) : null;
               const rr = (risk && isFinite(t1)) ? Math.abs(t1 - ticket.entry)/risk : null;
               return (
-                <div className="mono" style={{fontSize:11.5, color:'var(--dim)', margin:'2px 0 10px'}}>
-                  ryzyko: {risk ? fmtPrice(risk) + ' pkt' : '—'} · RR do TP1: {rr ? '1:' + rr.toFixed(2) : '—'}
-                  {rr != null && rr < 1.5 ? <span style={{color:'var(--ema9)'}}> · poniżej Twojej zasady 1:1.5!</span> : null}
+                <div style={{margin:'2px 0 10px'}}>
+                  {/* pipsy względem wejścia (0) */}
+                  <div className="mono" style={{fontSize:12, marginBottom:3}}>
+                    <span style={{color:'var(--dim2)'}}>wejście {fmtPrice(ticket.entry)} (0) · </span>
+                    {isFinite(sl) && <span style={{color:'var(--down)', fontWeight:700}}>SL {signedPips(item.sym, sl - ticket.entry)}</span>}
+                    {isFinite(t1) && <span style={{color:'var(--up)', fontWeight:700}}>{'  ·  TP1 ' + signedPips(item.sym, t1 - ticket.entry)}</span>}
+                    {isFinite(t2) && <span style={{color:'var(--up)', fontWeight:600}}>{'  ·  TP2 ' + signedPips(item.sym, t2 - ticket.entry)}</span>}
+                  </div>
+                  <div className="mono" style={{fontSize:11.5, color:'var(--dim)'}}>
+                    ryzyko: {risk ? fmtPips(item.sym, risk) : '—'} · RR do TP1: {rr ? '1:' + rr.toFixed(2) : '—'}
+                    {rr != null && rr < 1.5 ? <span style={{color:'var(--ema9)'}}> · poniżej Twojej zasady 1:1.5!</span> : null}
+                  </div>
                 </div>
               );
             })()}

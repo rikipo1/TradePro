@@ -62,3 +62,10 @@ export function fmtPips(sym, priceDist){
   const p = toPips(sym, priceDist);
   return p == null ? '—' : p + ' pip';
 }
+/* pipsy ZE ZNAKIEM względem wejścia: „+30 pip" / „−10 pip".
+   Entry = punkt odniesienia (0), TP nad wejściem = +, SL pod wejściem = −. */
+export function signedPips(sym, priceDist){
+  const p = toPips(sym, priceDist);
+  if(p == null) return '—';
+  return (priceDist >= 0 ? '+' : '−') + p + ' pip';
+}
