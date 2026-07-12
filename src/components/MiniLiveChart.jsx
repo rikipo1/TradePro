@@ -3,7 +3,7 @@ import { CAP_MAP, capEnabled, capitalTick } from '../data/capital.js';
 import { fetchChartWindow, TF_SEC } from '../data/feed.js';
 import { paperFloating } from '../data/paper.js';
 import { TFS } from '../data/yahoo.js';
-import { fmtPrice } from '../utils/format.js';
+import { fmtPrice, fmtTime, fmtFull, niceStep } from '../utils/format.js';
 
 export function MiniLiveChart({ entry }){
   const wrapRef = useRef(null);
@@ -95,7 +95,7 @@ export function MiniLiveChart({ entry }){
     if(view.length < 3) view = candles.slice(-40);
     if(!view.length) return;
 
-    const axW = 54, padT = 10, padB = 8;
+    const axW = 56, padT = 10, padB = 20;   // padB większy → miejsce na oś czasu
     const plotR = W - axW, plotL = 4, plotW = plotR - plotL;
     const ph = H - padT - padB;
 
@@ -108,13 +108,44 @@ export function MiniLiveChart({ entry }){
     lo -= pad; hi += pad;
     const rng = hi - lo;
     const cw = plotW / view.length;
-    const bw = Math.min(14, Math.max(1.5, cw * 0.6));
+    const bw = Math.min(14, Math.max(1.5, cw * 0.62));
     const X = q => plotL + q*cw + cw/2;
     const Y = p => padT + (hi - p)/rng * ph;
+    const dec = (hi >= 100 ? 1 : hi >= 10 ? 2 : 4);
+
+    /* --- SIATKA cen + oś prawa (profesjonalny wygląd) --- */
+    const step = niceStep(rng, 4);
+    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.textBaseline = 'middle';
+    for(let v = Math.ceil(lo/step)*step; v < hi; v += step){
+      const y = Y(v);
+      if(y < padT || y > H - padB) continue;
+      ctx.strokeStyle = 'rgba(159,226,214,.06)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
+      ctx.fillStyle = '#5f8480'; ctx.textAlign = 'left';
+      ctx.fillText(v.toFixed(dec), plotR + 4, y);
+    }
+    /* separator osi */
+    ctx.strokeStyle = 'rgba(159,226,214,.12)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(plotR + 0.5, padT); ctx.lineTo(plotR + 0.5, H - padB); ctx.stroke();
 
     /* indeks świecy wejścia w widoku */
     let entryQ = -1;
     for(let q=0;q<view.length;q++){ if(view[q].t*1000 <= entry.ts) entryQ = q; else break; }
+
+    /* --- OŚ CZASU (godz:min) na dole --- */
+    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.textBaseline = 'top'; ctx.fillStyle = '#5f8480';
+    const nLab = Math.max(2, Math.min(5, Math.floor(plotW / 62)));
+    for(let li=0; li<=nLab; li++){
+      const q = Math.round(li/nLab * (view.length - 1));
+      const c = view[q]; if(!c) continue;
+      const x = X(q);
+      ctx.strokeStyle = 'rgba(159,226,214,.05)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, H - padB); ctx.stroke();
+      ctx.textAlign = li === 0 ? 'left' : li === nLab ? 'right' : 'center';
+      ctx.fillText(fmtTime(c.t, entry.tf), Math.max(plotL, Math.min(plotR, x)), H - padB + 4);
+    }
 
     /* podświetlenie kolumny świecy wejścia (żeby było WIDAĆ kiedy było wejście) */
     if(entryQ >= 0){
@@ -171,7 +202,7 @@ export function MiniLiveChart({ entry }){
       ctx.font = '700 9px JetBrains Mono, monospace';
       ctx.fillStyle = dirCol; ctx.textBaseline = 'top';
       ctx.textAlign = x > W*0.6 ? 'right' : 'left';
-      ctx.fillText((entry.dir > 0 ? '▲ LONG' : '▼ SHORT') + ' · wejście', x > W*0.6 ? x - 6 : x + 6, padT + 1);
+      ctx.fillText((entry.dir > 0 ? '▲ LONG' : '▼ SHORT') + ' · ' + fmtTime(c.t, entry.tf), x > W*0.6 ? x - 6 : x + 6, padT + 1);
     }
 
     /* znacznik zamknięcia */
@@ -216,15 +247,16 @@ export function MiniLiveChart({ entry }){
         <canvas ref={cvsRef} style={{display:'block', borderRadius:8}} />
       </div>
       <div className="mono" style={{display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:11, color:'var(--dim2)', marginTop:5, gap:8, flexWrap:'wrap'}}>
-        <span style={{display:'flex', gap:6, alignItems:'center'}}>
+        <span style={{display:'flex', gap:6, alignItems:'center', flexWrap:'wrap'}}>
           <b style={{color: entry.dir > 0 ? 'var(--up)' : 'var(--down)'}}>{entry.dir > 0 ? '▲ LONG' : '▼ SHORT'}</b>
           <span>{entry.tf}</span>
+          <span style={{color:'var(--dim)'}}>· {fmtFull(Math.floor(entry.ts/1000), entry.tf)}</span>
           {entryBull != null && (
             <span style={{color: entryBull ? 'var(--up)' : 'var(--down)'}}>
-              · świeca wejścia {entryBull ? 'wzrostowa' : 'spadkowa'}
+              · świeca {entryBull ? 'wzrostowa' : 'spadkowa'}
             </span>
           )}
-          {approx && <span style={{color:'var(--ema9)'}}> · poglądowo (brak świec z czasu wejścia)</span>}
+          {approx && <span style={{color:'var(--ema9)'}}> · poglądowo</span>}
         </span>
         {isOpen
           ? <span style={{color: floating == null ? 'var(--dim)' : floating >= 0 ? 'var(--up)' : 'var(--down)', fontWeight:700}}>
