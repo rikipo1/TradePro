@@ -125,8 +125,14 @@ export function rankStrategies(ctx, journal, opts = {}) {
     const sessMult = ctx.sess.weekend ? 0.5 : ctx.sess.quality === 2 ? 1.08 : ctx.sess.quality === 1 ? 1.03 : 0.9;
     const adj = learnAdjust(stats, r.id);
     const score = Math.round(clamp(r.base * regimeMult * mtfMult * sessMult + adj, 0, 97));
+    /* każda wykryta strategia dostaje własne poziomy (Entry/SL/TP1–TP4) —
+       widoczne w rankingu nawet, gdy werdykt to BRAK TRANSAKCJI
+       (wtedy to scenariusz WARUNKOWY, nie sygnał) */
+    const lv = strategyLevels(ctx, r.dir);
+    const pe = probEstimate(score, stats, r.id);
     ranking.push({
       ...r, score, adj,
+      levels: lv, probability: pe.p, probabilitySrc: pe.src,
       mults: { regime: +regimeMult.toFixed(2), mtf: +mtfMult.toFixed(2), sess: +sessMult.toFixed(2) },
       learn: learnNote(stats, r.id),
     });
@@ -166,8 +172,8 @@ export function rankStrategies(ctx, journal, opts = {}) {
       },
     };
   } else {
-    const lv = strategyLevels(ctx, decision.dir);
-    const pe = probEstimate(decision.score, stats, decision.id);
+    const lv = decision.levels;
+    const pe = { p: decision.probability, src: decision.probabilitySrc };
     const rivals = ranking.slice(1, 5);
     out = {
       verdict: decision.dir > 0 ? 'LONG' : 'SHORT', dir: decision.dir, best: decision,

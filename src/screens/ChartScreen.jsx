@@ -39,6 +39,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const [aiState, setAiState] = useState({ busy:false, res:null, err:null, at:null, provider:null });
   const [showBt, setShowBt] = useState(false);
   const [showStrat, setShowStrat] = useState(false); // 🏛 ranking strategii
+  const [expStrat, setExpStrat] = useState(null);     // rozwinięty wiersz rankingu
   const [ticket, setTicket] = useState(null);
   const [bt, setBt] = useState({ busy:false, res:null });
   const [wv, setWv] = useState(0); // wersja wag modelu (bump po treningu → recompute)
@@ -1183,15 +1184,47 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   {/* RANKING */}
                   <div className="section-label" style={{padding:'4px 0'}}>Ranking wykrytych strategii</div>
                   {stratRank.ranking.length === 0 && <div style={{fontSize:12, color:'var(--dim2)', padding:'6px 2px'}}>Żaden detektor nie widzi aktywnego setupu na tej świecy.</div>}
-                  {stratRank.ranking.map((r, k) => (
-                    <div key={k} style={{display:'flex', alignItems:'center', gap:8, padding:'5px 2px', borderBottom:'1px solid var(--border)'}}>
-                      <span className="mono" style={{width:16, color:'var(--dim2)', fontSize:11}}>{k+1}.</span>
-                      <span style={{color: r.dir > 0 ? 'var(--up)' : 'var(--down)', fontWeight:900, width:14}}>{r.dir > 0 ? '▲' : '▼'}</span>
-                      <span style={{flex:1, fontSize:12.5, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{r.name}</span>
-                      <span className="sgauge" style={{width:52}}><i style={{width: r.score + '%', background: r.score >= 60 ? '#c792ff' : '#8fb0ac'}} /></span>
-                      <span className="mono" style={{fontSize:12, fontWeight:800, width:38, textAlign:'right', color: r.score >= 60 ? '#c792ff' : 'var(--dim)'}}>{r.score}%</span>
-                    </div>
-                  ))}
+                  {stratRank.ranking.map((r, k) => {
+                    const isExp = expStrat === r.id;
+                    const L = r.levels;
+                    return (
+                      <React.Fragment key={r.id}>
+                        <div style={{display:'flex', alignItems:'center', gap:8, padding:'5px 2px', borderBottom: isExp ? 'none' : '1px solid var(--border)', cursor:'pointer'}}
+                          onClick={() => setExpStrat(x => x === r.id ? null : r.id)}>
+                          <span className="mono" style={{width:16, color:'var(--dim2)', fontSize:11}}>{k+1}.</span>
+                          <span style={{color: r.dir > 0 ? 'var(--up)' : 'var(--down)', fontWeight:900, width:14}}>{r.dir > 0 ? '▲' : '▼'}</span>
+                          <span style={{flex:1, fontSize:12.5, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{isExp ? '▾ ' : '▸ '}{r.name}</span>
+                          <span className="sgauge" style={{width:52}}><i style={{width: r.score + '%', background: r.score >= 60 ? '#c792ff' : '#8fb0ac'}} /></span>
+                          <span className="mono" style={{fontSize:12, fontWeight:800, width:38, textAlign:'right', color: r.score >= 60 ? '#c792ff' : 'var(--dim)'}}>{r.score}%</span>
+                        </div>
+                        {isExp && L && (
+                          <div style={{margin:'0 0 6px 20px', padding:'8px 10px', background:'var(--bg)', border:'1px solid var(--border)', borderRadius:10, borderBottom:'1px solid var(--border)'}}>
+                            {r.score < 60 && (
+                              <div style={{fontSize:10.5, color:'var(--ema9)', marginBottom:4}}>⚠ scenariusz WARUNKOWY ({r.score}% &lt; próg 60%) — poziomy orientacyjne, czekaj na spełnienie warunków</div>
+                            )}
+                            <div className="mono" style={{fontSize:11.5, lineHeight:1.7}}>
+                              <div>Entry <b>{fmtPrice(L.entry)}</b> · SL <b style={{color:'var(--down)'}}>{fmtPrice(L.sl)}</b> <span style={{color:'var(--dim2)'}}>({fmtPrice(L.slDist)} pkt)</span></div>
+                              <div>TP1 <b style={{color:'var(--up)'}}>{fmtPrice(L.tp1)}</b> · TP2 {fmtPrice(L.tp2)} · TP3 {fmtPrice(L.tp3)} · TP4 {fmtPrice(L.tp4)}</div>
+                              <div style={{color:'var(--dim2)'}}>P(win) ~{Math.round((r.probability || 0)*100)}% ({r.probabilitySrc}) · {r.learn}</div>
+                            </div>
+                            <div style={{fontSize:11, color:'var(--dim)', marginTop:4, lineHeight:1.5}}>{r.why.join(' · ')}</div>
+                            <div style={{fontSize:10.5, color:'var(--down)', marginTop:2}}>unieważnia: {r.invalidates.join(' · ')}</div>
+                            {!journal.some(e => e.paper && (e.result === 'open' || e.result === 'pending') && e.sym === item.sym) && (
+                              <button className="chip mono" style={{width:'100%', justifyContent:'center', padding:'8px 0', marginTop:6, fontSize:12,
+                                color: r.dir > 0 ? 'var(--up)' : 'var(--down)', borderColor: r.dir > 0 ? 'rgba(47,214,174,.4)' : 'rgba(255,107,94,.4)'}}
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  if(tryOpenPaper(r.dir, L.entry, L.sl, L.tp1, L.tp2, 'strategy:' + r.id, r.score, null, signal, { strategy: r.id })){
+                                    Bus.show('▶ Paper: ' + r.name + (r.score < 60 ? ' (scenariusz warunkowy!)' : '') + ' — wynik zasili uczenie');
+                                    setShowStrat(false);
+                                  }
+                                }}>▶ Otwórz paper wg tej strategii ({r.dir > 0 ? 'LONG' : 'SHORT'})</button>
+                            )}
+                          </div>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
 
                   {/* EXPLAIN AI */}
                   <div className="section-label" style={{padding:'10px 0 4px'}}>Explain AI — dlaczego ta decyzja</div>

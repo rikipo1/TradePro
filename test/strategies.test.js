@@ -38,6 +38,13 @@ test('[STRAT] buildStrategyCtx + rankStrategies: pełny wynik z rankingiem i sub
   }
   // ranking posortowany malejąco
   for (let k = 1; k < r.ranking.length; k++) assert.ok(r.ranking[k - 1].score >= r.ranking[k].score);
+  // KAŻDA wykryta strategia ma własne poziomy po właściwych stronach
+  for (const st of r.ranking) {
+    assert.ok(st.levels && st.levels.entry != null && st.levels.sl != null, 'poziomy dla ' + st.id);
+    assert.ok((st.dir === 1) === (st.levels.sl < st.levels.entry), 'SL po właściwej stronie: ' + st.id);
+    assert.ok((st.dir === 1) === (st.levels.tp4 > st.levels.entry), 'TP4 po właściwej stronie: ' + st.id);
+    assert.ok(st.probability > 0 && st.probability < 1, 'P(win) dla ' + st.id);
+  }
   for (const k of ['marketStructure', 'trend', 'momentum', 'liquidity', 'volatility', 'risk']) {
     assert.ok(r.scores[k] >= 0 && r.scores[k] <= 100, 'sub-score ' + k);
   }
