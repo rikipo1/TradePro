@@ -8,6 +8,11 @@ import { paperFloating } from '../data/paper.js';
 import { riskStatus } from '../signals/riskEngine.js';
 import { rollingStats, degradation } from '../signals/monitor.js';
 import { Store } from '../core/store.js';
+import { compareShadow } from '../backtest/shadow.js';
+import { backtestEngine } from '../backtest/engine.js';
+import { indicatorsFor } from '../signals/engine.js';
+import { getChart } from '../data/feed.js';
+import { TFS } from '../data/yahoo.js';
 import { fmtPrice, pad2 } from '../utils/format.js';
 
 export function fmtDT(ts){
@@ -31,6 +36,7 @@ export function JournalScreen({ journal, setJournal }){
   const [q, setQ] = useState({});
   const [busyPx, setBusyPx] = useState(false);
   const [expanded, setExpanded] = useState(null);
+  const [shadow, setShadow] = useState({ busy:false, res:null, combo:null }); // [E3-2]
 
   /* statystyki tylko z ROZSTRZYGNIĘTYCH transakcji — pending/cancelled
      (zlecenia limit) nie są transakcjami i nie mogą zaniżać średnich */
@@ -171,6 +177,60 @@ export function JournalScreen({ journal, setJournal }){
               <div style={{fontSize:11.5, color:'var(--ema9)', paddingTop:2, lineHeight:1.5}}>
                 ⚠ {((deg.degraded ? deg.reasons : meta.degradedWhy) || []).join(' · ')} — model przełączony na wagi domyślne do czasu ponownego treningu.
               </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {(() => {
+        /* [E3-2] Backtest vs Paper — ten sam sym×TF, wspólny okres */
+        const combos = Array.from(new Set(journal
+          .filter(e => e.paper && e.tf && e.tf !== '—' && e.result !== 'open' && e.result !== 'pending' && e.result !== 'cancelled')
+          .map(e => e.sym + '|' + e.tf)));
+        if(!combos.length) return null;
+        const runCompare = async (combo) => {
+          const [sym, tfId] = combo.split('|');
+          const tfObj = TFS.find(t => t.id === tfId);
+          if(!tfObj){ Bus.show('Nieznany interwał ' + tfId); return; }
+          setShadow({ busy:true, res:null, combo });
+          try{
+            const paper = journal.filter(e => e.paper && e.sym === sym && e.tf === tfId
+              && e.result !== 'open' && e.result !== 'pending' && e.result !== 'cancelled');
+            const minTs = Math.min(...paper.map(e => e.ts || Date.now())) / 1000;
+            const ch = await getChart(sym, tfObj, 'auto');
+            const pack = indicatorsFor(ch.candles, tfId);
+            const bt = backtestEngine(ch.candles, pack.ind, pack.emaData, pack.hasVol, sym, 30, null, { tfId });
+            const btCommon = bt.trades.filter(t => ch.candles[t.i0] && ch.candles[t.i0].t >= minTs);
+            const btUse = btCommon.length >= 10 ? btCommon : bt.trades; // wspólny okres, fallback: całość
+            setShadow({ busy:false, combo, res: { cmp: compareShadow(paper, btUse), common: btCommon.length >= 10 } });
+          }catch(err){
+            setShadow({ busy:false, combo, res:null });
+            Bus.show('Porównanie nieudane: ' + (err.message || 'błąd danych'));
+          }
+        };
+        const r = shadow.res && shadow.res.cmp;
+        return (
+          <div className="card" style={{marginTop:2}}>
+            <div style={{fontWeight:800, fontSize:13, marginBottom:6}}>Backtest vs Paper (shadow)</div>
+            <div style={{display:'flex', gap:6, flexWrap:'wrap', marginBottom:6}}>
+              {combos.slice(0, 6).map(cb => (
+                <button key={cb} className={'chip mono' + (shadow.combo === cb ? ' sel' : '')}
+                  style={{fontSize:11, padding:'6px 10px', opacity: shadow.busy ? 0.6 : 1}}
+                  onClick={() => { if(!shadow.busy) runCompare(cb); }}>
+                  {cb.replace('|', ' · ')}
+                </button>
+              ))}
+            </div>
+            {shadow.busy && <div style={{fontSize:12, color:'var(--dim2)'}}>Liczę backtest na bieżących świecach…</div>}
+            {r && !shadow.busy && (
+              <>
+                <div className="kv"><b>PAPER</b><span className="mono">{r.paper.n} tr · {r.paper.avgR != null ? r.paper.avgR + 'R' : '—'} · traf. {r.paper.winRate != null ? r.paper.winRate + '%' : '—'} · BE {Math.round((r.paper.beShare || 0) * 100)}% · approx {Math.round((r.paper.approxShare || 0) * 100)}%</span></div>
+                <div className="kv"><b>BACKTEST</b><span className="mono">{r.backtest.n} tr · {r.backtest.avgR != null ? r.backtest.avgR + 'R' : '—'} · traf. {r.backtest.winRate != null ? r.backtest.winRate + '%' : '—'} · BE {Math.round((r.backtest.beShare || 0) * 100)}%</span></div>
+                <div style={{fontSize:12, lineHeight:1.55, paddingTop:4,
+                  color: r.verdict === 'OK' ? 'var(--up)' : r.verdict === 'NIEWYJAŚNIONA' ? 'var(--down)' : 'var(--dim)'}}>
+                  Werdykt: <b>{r.verdict}</b> — {r.why}{shadow.res.common ? '' : ' · (za mało transakcji we wspólnym okresie — porównano z całą historią świec)'}
+                </div>
+              </>
             )}
           </div>
         );
