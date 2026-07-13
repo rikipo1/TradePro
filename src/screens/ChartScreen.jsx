@@ -330,6 +330,17 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
         { p: L.tp2,   label: 'TP2',   color: 'rgba(47,214,174,.65)' },
       );
     }
+    /* 🏛 poziomy zwycięskiej strategii rankingu na wykresie, gdy główny
+       silnik nie ma aktywnego sygnału (fiolet — odróżnienie od silnika) */
+    if(!(signal && signal.dir !== 0 && signal.levels) && stratRank && stratRank.dir !== 0 && stratRank.levels){
+      const L = stratRank.levels;
+      out.push(
+        { p: L.entry, label: '🏛 E',   color: '#c792ff' },
+        { p: L.sl,    label: '🏛 SL',  color: 'rgba(255,107,94,.8)' },
+        { p: L.tp1,   label: '🏛 TP1', color: 'rgba(47,214,174,.8)' },
+        { p: L.tp2,   label: '🏛 TP2', color: 'rgba(47,214,174,.5)' },
+      );
+    }
     const op = topOpp;
     if(op && op.state !== 'invalidated' && op.entry != null){
       if(op.zone){
@@ -341,7 +352,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       out.push({ p: op.entry, label: '⌖ ' + op.grade, color: '#ffc94d' });
     }
     return out.length ? out : null;
-  }, [signal, topOpp]);
+  }, [signal, topOpp, stratRank]);
 
   /* powiadomienie, gdy cena zbliża się do strefy dobrej okazji */
   useEffect(() => {
@@ -686,6 +697,43 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
           {signal.warns.length > 0 && <span style={{color:'var(--ema9)', fontSize:15}}>⚠</span>}
         </button>
       )}
+
+      {/* 🏛 pasek werdyktu rankingu strategii — widoczny od razu, jak pasek silnika */}
+      {stratRank && (() => {
+        const sr = stratRank;
+        const active = sr.dir !== 0 && sr.levels;
+        const top = sr.ranking && sr.ranking[0];
+        const dcol = sr.dir > 0 ? '#2fd6ae' : sr.dir < 0 ? '#ff6b5e' : '#8fb0ac';
+        return (
+          <button className="sigstrip" onClick={() => setShowStrat(true)}
+            style={{
+              borderColor: active ? (sr.dir > 0 ? 'rgba(47,214,174,.45)' : 'rgba(255,107,94,.45)') : 'rgba(199,146,255,.35)',
+              background: active ? (sr.dir > 0 ? 'rgba(47,214,174,.07)' : 'rgba(255,107,94,.07)') : 'rgba(199,146,255,.05)',
+            }}>
+            <span className="sig-dir" style={{color: dcol}}>
+              🏛 {active ? (sr.dir > 0 ? 'KUP' : 'SPRZEDAJ') : 'CZEKAJ'}
+            </span>
+            <span className="sgauge">
+              <i style={{width: (sr.scores.confidence || 0) + '%', background: active ? dcol : '#c792ff'}} />
+            </span>
+            <span className="sig-meta mono" style={{color:'var(--dim)'}}>
+              {active
+                ? sr.best.name.slice(0, 26) + ' · ' + sr.confidence + '%'
+                : (top ? 'najlepsza: ' + top.name.slice(0, 22) + ' ' + top.score + '% < 60%' : 'brak setupu na tej świecy')}
+              <br/>
+              {active
+                ? 'E ' + fmtPrice(sr.levels.entry) + ' · SL ' + fmtPrice(sr.levels.sl) + ' · TP1 ' + fmtPrice(sr.levels.tp1)
+                : (top && top.levels ? '(war.) E ' + fmtPrice(top.levels.entry) + ' · SL ' + fmtPrice(top.levels.sl) + ' · TP1 ' + fmtPrice(top.levels.tp1) : 'ranking strategii — tapnij')}
+            </span>
+            {sr.mtf && sr.mtf.frames.length > 0 && (
+              <span className="mono" style={{fontSize:10, fontWeight:800, padding:'2px 6px', borderRadius:6, whiteSpace:'nowrap',
+                color:'#c792ff', background:'rgba(199,146,255,.12)', border:'1px solid rgba(199,146,255,.3)'}}>
+                MTF {sr.mtf.align > 0.15 ? '▲' : sr.mtf.align < -0.15 ? '▼' : '•'}
+              </span>
+            )}
+          </button>
+        );
+      })()}
 
       {topOpp && topOpp.state !== 'invalidated' && (() => {
         const op = topOpp;
