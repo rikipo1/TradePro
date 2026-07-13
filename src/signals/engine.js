@@ -9,7 +9,7 @@ import { buildOpportunities } from './opportunities.js';
 import { classifyRegime } from './regime.js';
 import { extractFactors, orientedVector } from './features.js';
 import { predictProb, expectedValueR, applyIsotonic } from './model.js';
-import { similarOutcomes, blendProb } from './similarity.js';
+import { similarOutcomes } from './similarity.js';
 import { liquidityModel, drawOnLiquidity } from './liquidity.js';
 import { volumeProfile } from './volumeProfile.js';
 import { positionSizing } from './sizing.js';
@@ -309,13 +309,14 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   let prob = dir !== 0 ? predictProb(orientedVector(factors, dir), weights) : 0.5;
   if(dir !== 0 && calibMap) prob = applyIsotonic(prob, calibMap);
 
-  /* Similarity Engine (kNN): "co robiły podobne historyczne setupy" —
-     nieliniowa, empiryczna korekta P (wpływ ograniczony, maks ~35%) */
+  /* Similarity Engine (kNN): WYŁĄCZNIE diagnostyka UI [A2]. k-fold nigdy nie
+     przekazuje __knn do przebiegów foldowych, więc mieszanie kNN w live
+     oznaczałoby, że certyfikat "reliable" dotyczy innego systemu niż ten,
+     który handluje (brak parytetu validate↔serve). prob NIE jest korygowane. */
   const knnHist = (srOverride && srOverride.__knn) || null;
   let similar = null;
   if(dir !== 0 && knnHist && knnHist.length >= 40){
     similar = similarOutcomes(knnHist, orientedVector(factors, dir), 20);
-    if(similar) prob = blendProb(prob, similar);
   }
 
   /* blokada kontry HTF przy niskim P(win) */
