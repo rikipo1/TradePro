@@ -12,6 +12,23 @@ geometrycznych, analiza **Smart Money Concepts (SMC)**, silnik sygnałów
 
 ## Zmiany
 
+### v1.5.0 — Etap 2 audytu: jakość sygnałów
+
+- **[E2-1]** harness ablacyjny (`scripts/ablation.js`, flagi `__ablate`,
+  przycisk 🔬 w modalu backtestu). Wynik na danych rzeczywistych
+  (DE40/US500/EURUSD × M5/M15/H1): **reguła usuwania elementów
+  niewykonywalna** — podaż etykiet TP1/SL na zakresach Yahoo jest za mała,
+  by trenować i porównywać konfiguracje (szczegóły: `docs/ABLACJA.md`).
+  Żaden element toru decyzyjnego nie został usunięty.
+- **[E2-2]** **nowa definicja `reliable`**: n_oos ≥ 200 ∧ med(avgR) > 0 ∧
+  p25(avgR) > −0.05 ∧ Brier p75 < 0.25 ∧ pokrycie ≥ 2 reżimów; UI pokazuje,
+  który warunek nie przeszedł.
+- **[E2-3]** pełna aktywacja modelu dopiero po **2 kolejnych treningach**
+  reliable w odstępie ≥24 h (stan „kandydat 1/2").
+- **[E2-4]** cooldown 60 s przycisku treningu + twardy budżet czasu k-fold.
+- **[E2-5]** log zmian parametrów decyzyjnych (`rt_paramlog`) + ostrzeżenie
+  „zmiana niezwalidowana" w panelu strojenia.
+
 ### v1.4.0 — Etap 1 audytu: krytyczne poprawki metodologii i ryzyka
 
 - **[A1]** trening przez **walk-forward k-fold**; kalibracja isotonic

@@ -24,12 +24,12 @@ w k-fold (parytet validate↔serve). Backtest zawsze pesymistyczny.
 
 ## ETAP 2 — jakość sygnałów (v1.5.0)
 
-- [ ] **E2-1** Harness ablacyjny (`scripts/ablation.js`, flagi `__ablate`)
-- [ ] **E2-2 [A8]** Zaostrzenie progu `reliable` (n≥200, med>0, p25>−0.05,
+- [x] **E2-1** Harness ablacyjny (`scripts/ablation.js`, flagi `__ablate`)
+- [x] **E2-2 [A8]** Zaostrzenie progu `reliable` (n≥200, med>0, p25>−0.05,
       Brier p75<0.25, regimeCoverage≥2)
-- [ ] **E2-3** Potwierdzenie dwoma treningami (`reliableStreak`)
-- [ ] **E2-4** Cooldown 60 s + budżet czasu treningu (M7/M8)
-- [ ] **E2-5** Higiena progu minProb (ostrzeżenie + `rt_paramlog`)
+- [x] **E2-3** Potwierdzenie dwoma treningami (`reliableStreak`)
+- [x] **E2-4** Cooldown 60 s + budżet czasu treningu (M7/M8)
+- [x] **E2-5** Higiena progu minProb (ostrzeżenie + `rt_paramlog`)
 
 ## ETAP 3 — monitoring, walidacja ciągła, wykonanie (v1.6.0)
 
