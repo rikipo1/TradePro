@@ -263,7 +263,11 @@ export function walkForwardKFold(candles, ind, emaData, hasVol, sym, minScore, s
 
   /* wagi produkcyjne: trening na wszystkich zamkniętych próbkach */
   const trProd = trainLogistic(base.samples, { epochs: 500 });
-  if(!trProd.trained) return { ok:false, reason: trProd.reason, weights: trProd.weights };
+  if(!trProd.trained) return {
+    ok:false, reason: trProd.reason, weights: trProd.weights,
+    samplesCollected: base.samples.length, samplesNeeded: 30, // [FIX] diagnostyka podaży etykiet
+    tradesN: base.trades.length,
+  };
   if(overBudget()) return { ok:false, reason:'przekroczono budżet czasu' };
   const prodRun = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: trProd.weights, tfId, ablate });
   const prodInSample = statsOf(prodRun.trades); // WYŁĄCZNIE diagnostyka — nie do decyzji

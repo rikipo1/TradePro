@@ -2,7 +2,7 @@ import { Bus } from '../core/bus.js';
 import { Net, fetchJson } from '../core/net.js';
 import { CAP_MAP, capEnabled, capWarned, capitalChart, setCapWarned } from './capital.js';
 import { stooqDaily } from './stooq.js';
-import { yahooChart } from './yahoo.js';
+import { yahooChart, TF_MAX_RANGE } from './yahoo.js';
 import { atrSeries, emaOver } from '../indicators/index.js';
 import { zigzag } from '../patterns/index.js';
 import { marketStructure } from '../smc/index.js';
@@ -124,6 +124,24 @@ function feedHealthNote(src, staleFlag){
   h.checks++;
   if(staleFlag) h.stale++;
   h.lastTs = now;
+}
+
+/* [FIX] Świece do TRENINGU/BACKTESTU: maksymalny zakres Yahoo dla danego
+   interwału (nie 5 dni z wykresu). To wprost mnoży podaż etykiet TP1/SL,
+   które gatowały training na „za mało próbek". Zawsze Yahoo (Capital ma
+   krótszą historię, a trening nie potrzebuje realtime). Fallback: świece
+   z wykresu, gdy rozszerzony zakres zawiedzie. */
+export async function fetchTrainingCandles(symbol, tf, chartCandles){
+  const maxRange = TF_MAX_RANGE[tf.id] || tf.range;
+  if(maxRange && maxRange !== tf.range){
+    try{
+      const r = await yahooChart(symbol, { ...tf, range: maxRange });
+      if(r && r.candles && r.candles.length > (chartCandles ? chartCandles.length : 0)){
+        return { candles: r.candles, range: maxRange, extended: true };
+      }
+    }catch(e){ /* padło rozszerzenie — użyj świec z wykresu */ }
+  }
+  return { candles: chartCandles || [], range: tf.range, extended: false };
 }
 
 /* wybór źródła: tylko realne dane na żywo (DEMO usunięte) */

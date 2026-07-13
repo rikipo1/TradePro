@@ -15,11 +15,11 @@ import { IC, Ic } from '../components/icons.jsx';
 import { Bus } from '../core/bus.js';
 import { Net } from '../core/net.js';
 import { CAP_MAP, capEnabled, capResolveEpic, capWsStart, capWsStop, capitalTick } from '../data/capital.js';
-import { TF_SEC, getChart, htfTrend } from '../data/feed.js';
+import { TF_SEC, getChart, htfTrend, fetchTrainingCandles } from '../data/feed.js';
 import { TFS } from '../data/yahoo.js';
 import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
 import { detectPatterns } from '../patterns/index.js';
-import { computeSignal } from '../signals/engine.js';
+import { computeSignal, indicatorsFor } from '../signals/engine.js';
 import { displacement } from '../smc/index.js';
 import { portfolioCheck } from '../signals/portfolio.js';
 import { buildPaperEntry } from '../data/paperEntry.js';
@@ -1111,34 +1111,63 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div style={{display:'flex', alignItems:'center', gap:9, marginBottom:8}}>
               <span style={{fontWeight:900, fontSize:16}}>⟲ Backtest silnika</span>
-              <span className="tag mono">{item.sym} · {tf.label} · {candlesSafe.length} świec</span>
+              <span className="tag mono">{item.sym} · {tf.label} · {bt.res && bt.res.trainMeta ? bt.res.trainMeta.candles + ' świec' + (bt.res.trainMeta.extended ? ' (maks)' : '') : candlesSafe.length + ' świec (wykres)'}</span>
             </div>
             <div style={{overflowY:'auto', flex:1}}>
               <button className="chip sel mono"
                 style={{width:'100%', justifyContent:'center', padding:'12px', fontSize:14, opacity: bt.busy ? 0.6 : 1}}
-                onClick={() => {
+                onClick={async () => {
                   if(bt.busy || !ind || candlesSafe.length < 90){
                     if(!bt.busy) Bus.show('Za mało świec do backtestu (min 90)');
                     return;
                   }
                   setBt({ busy:true, res:null });
+                  /* [FIX] backtest na MAKSYMALNEJ historii (nie 5 dni z wykresu) —
+                     żeby nie pokazywał „3 transakcji" na tak małej próbie */
+                  let cc = candlesSafe, cpack = { ind, emaData, hasVol }, cext = false;
+                  if(tf.id !== 'D1'){
+                    try{
+                      const tc = await fetchTrainingCandles(item.sym, tf, candlesSafe);
+                      if(tc.candles && tc.candles.length > candlesSafe.length){
+                        cc = tc.candles; cext = tc.extended;
+                        cpack = indicatorsFor(cc, tf.id) || cpack;
+                      }
+                    }catch(e){}
+                  }
                   setTimeout(() => {
-                    const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc,
+                    const r = backtestEngine(cc, cpack.ind, cpack.emaData, cpack.hasVol, item.sym, prefs.minScore, prefs.smc,
                       { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
+                    r.trainMeta = { candles: cc.length, extended: cext };
+                    r.candlesUsed = cc;
                     setBt({ busy:false, res:r });
                   }, 40);
                 }}>
-                {bt.busy ? 'Liczę świeca po świecy…' : 'Uruchom backtest na załadowanej historii'}
+                {bt.busy ? 'Liczę świeca po świecy…' : 'Uruchom backtest (maks. historia)'}
               </button>
               <button className="chip mono"
                 style={{width:'100%', justifyContent:'center', padding:'10px', fontSize:13, marginTop:8, color:'var(--cyan)', borderColor:'rgba(79,216,255,.4)', opacity: bt.busy ? 0.6 : 1}}
-                onClick={() => {
-                  if(bt.busy || !ind || candlesSafe.length < 250){ if(!bt.busy) Bus.show('Do treningu wag trzeba ≥250 świec (zmień interwał na większy zakres)'); return; }
+                onClick={async () => {
+                  if(bt.busy || !ind || candlesSafe.length < 90){ if(!bt.busy) Bus.show('Poczekaj na dane wykresu'); return; }
                   if(trainCool > 0){ Bus.show('⏳ Cooldown treningu: odczekaj ' + trainCool + ' s'); return; } // [E2-4]
+                  if(tf.id === 'D1'){ Bus.show('Trening wag działa na interwałach śróddziennych (M5–H1)'); return; }
                   setTrainCool(60);
                   setBt({ busy:true, res:null });
+                  Bus.show('⏳ Pobieram maksymalną historię do treningu…');
+                  /* [FIX] trening na MAKSYMALNEJ historii Yahoo (nie 5 dni z wykresu) —
+                     wprost mnoży podaż etykiet TP1/SL, które gatowały „za mało próbek" */
+                  let tc, tpack, trainCandles, ext = false;
+                  try{
+                    tc = await fetchTrainingCandles(item.sym, tf, candlesSafe);
+                    trainCandles = tc.candles; ext = tc.extended;
+                    tpack = indicatorsFor(trainCandles, tf.id);
+                  }catch(e){ trainCandles = candlesSafe; tpack = { ind, emaData, hasVol }; }
+                  if(!tpack || !trainCandles || trainCandles.length < 250){
+                    setBt({ busy:false, res:null });
+                    Bus.show('Za mało historii do treningu (' + (trainCandles ? trainCandles.length : 0) + ' świec, min 250) — Yahoo nie daje dłuższej dla ' + tf.label);
+                    return;
+                  }
                   setTimeout(() => {
-                    const wf = walkForwardKFold(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, tf.id, { timeBudgetMs: 20000 });
+                    const wf = walkForwardKFold(trainCandles, tpack.ind, tpack.emaData, tpack.hasVol, item.sym, prefs.minScore, prefs.smc, tf.id, { timeBudgetMs: 20000 });
                     if(wf && wf.ok){
                       /* [E2-3] pełna aktywacja dopiero po 2 treningach reliable ≥24 h */
                       const prevMeta = Store.get('rt_model_meta', null);
@@ -1155,23 +1184,32 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                         totalNoos: wf.totalNoos,
                         oosPairsN: wf.oosPairsN, agg: wf.agg, payout: wf.payout,
                         regimeCoverage: wf.regimeCoverage, at: Date.now(),
+                        trainCandles: trainCandles.length, trainExtended: ext, // [FIX] ile świec i skąd
                         /* [E3-5] odcisk danych treningowych: pierwsza/ostatnia świeca + n */
-                        dataHash: candlesSafe.length ? (candlesSafe[0].t + '-' + candlesSafe[candlesSafe.length-1].t + '-' + candlesSafe.length) : null,
+                        dataHash: trainCandles.length ? (trainCandles[0].t + '-' + trainCandles[trainCandles.length-1].t + '-' + trainCandles.length) : null,
                       };
                       /* [E3-5] każdy trening = nowa wersja (max 3, FIFO) */
                       const knnPayload = wf.samples && wf.samples.length >= 40 ? wf.samples : null;
                       meta.modelV = saveModelVersion(item.sym, tf.id, { weights: wf.weights, calib: wf.calib || null, meta, knn: knnPayload });
                       Store.set('rt_model_meta', meta);
                       setWv(v => v + 1);
-                      Bus.show('🧠 k-fold OOS: ' + wf.totalNoos + ' tr · med avgR ' + (wf.agg.avgR.med != null ? wf.agg.avgR.med : '—') + 'R'
+                      Bus.show('🧠 k-fold OOS (' + trainCandles.length + ' świec' + (ext ? ', maks. historia' : '') + '): ' + wf.totalNoos + ' tr · med avgR ' + (wf.agg.avgR.med != null ? wf.agg.avgR.med : '—') + 'R'
                         + (wf.agg.brier.p75 != null ? ' · Brier p75 ' + wf.agg.brier.p75 : '')
                         + ' · ' + stageLabel(meta));
+                    } else if(wf && wf.samplesCollected != null){
+                      /* [FIX] czytelny komunikat zamiast gołego „za mało próbek": ile
+                         zebrano vs potrzeba i dlaczego (BE/TIMEOUT poza etykietami K5) */
+                      Bus.show('⚠ Za mało etykiet TP1/SL: zebrano ' + wf.samplesCollected + ' z ' + wf.samplesNeeded
+                        + ' (na ' + trainCandles.length + ' świecach było ' + wf.tradesN + ' transakcji, reszta to BE/TIMEOUT). '
+                        + 'Ten instrument·TF handluje za rzadko — spróbuj większy interwał (M15/H1) lub bardziej zmienny instrument.');
                     } else {
                       Bus.show('Trening nieudany: ' + (wf ? wf.reason : 'brak danych'));
                     }
-                    const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc,
+                    const r = backtestEngine(trainCandles, tpack.ind, tpack.emaData, tpack.hasVol, item.sym, prefs.minScore, prefs.smc,
                       { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
                     r.wf = wf;
+                    r.trainMeta = { candles: trainCandles.length, extended: ext };
+                    r.candlesUsed = trainCandles;
                     setBt({ busy:false, res:r });
                   }, 40);
                 }}>
@@ -1292,7 +1330,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       {bt.res.trades.slice(-8).reverse().map((t, k) => (
                         <div key={k} className="kv" style={{fontSize:12}}>
                           <b className="mono" style={{color: t.dir > 0 ? 'var(--up)' : 'var(--down)', fontWeight:700}}>
-                            {(t.dir > 0 ? '▲ ' : '▼ ') + (candlesSafe[t.i0] ? fmtFull(candlesSafe[t.i0].t, tf.id) : '')}
+                            {(t.dir > 0 ? '▲ ' : '▼ ') + (() => { const cu = (bt.res.candlesUsed || candlesSafe); return cu[t.i0] ? fmtFull(cu[t.i0].t, tf.id) : ''; })()}
                           </b>
                           <span className="mono" style={{color: t.r > 0 ? 'var(--up)' : t.r < 0 ? 'var(--down)' : 'var(--dim)'}}>
                             {t.out + ' ' + (t.r > 0 ? '+' : '') + t.r + 'R'}

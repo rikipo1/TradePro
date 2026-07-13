@@ -25,6 +25,11 @@ geometrycznych, analiza **Smart Money Concepts (SMC)**, silnik sygnałów
   modelV…) + eksport JSON dziennika.
 - **[E4-5]** `docs/RAPORT_KONCOWY.md` — finalna walidacja; rekomendacja:
   **PAPER ONLY** (uzasadnienie liczbami).
+- **[fix]** trening wag i backtest liczą teraz na **maksymalnej historii Yahoo**
+  (M5→60 dni, H1→2 lata) zamiast na 5 dniach z wykresu — 3–5× więcej etykiet
+  TP1/SL. Komunikat „za mało próbek" zastąpiony konkretem („zebrano 9 z 30 —
+  na 6042 świecach 16 transakcji, reszta BE/TIMEOUT; spróbuj większy interwał
+  lub bardziej zmienny instrument").
 
 ### v1.6.0 — Etap 3 audytu: monitoring, walidacja ciągła, wykonanie
 
