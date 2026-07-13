@@ -238,6 +238,46 @@ export async function capitalChart(symbol, tf){
     live: true,
   };
 }
+/* [FIX] GŁĘBOKA HISTORIA do treningu/backtestu — paginacja po 1000 świec
+   (Capital pozwala max 1000/żądanie, więc cofamy się stronami po `to`).
+   Yahoo intraday jest sztywno ograniczony do ~60 dni; Capital daje znacznie
+   więcej etykiet TP1/SL. UWAGA: Capital limituje historię (~10 tys. punktów
+   na klucz/dobę) — dlatego domyślnie celujemy w ~5000 świec i ≤5 stron. */
+function capFmtDate(sec){
+  return new Date(sec*1000).toISOString().slice(0, 19); // yyyy-MM-ddTHH:mm:ss (UTC)
+}
+export async function capitalHistory(symbol, tf, targetBars = 5000, maxPages = 5){
+  const epic = await capResolveEpic(symbol);
+  const res = CAP_RES[tf.id] || 'MINUTE_5';
+  const seen = new Map(); // sec -> świeca (dedup między stronami)
+  let toParam = null;
+  for(let page = 0; page < maxPages; page++){
+    let path = '/api/v1/prices/' + epic + '?resolution=' + res + '&max=1000';
+    if(toParam) path += '&to=' + encodeURIComponent(toParam);
+    let j;
+    try{ j = await capGet(path); }catch(e){ break; }
+    const arr = (j && j.prices) || [];
+    if(!arr.length) break;
+    let oldest = Infinity, added = 0;
+    for(let q=0;q<arr.length;q++){
+      const p = arr[q];
+      const o = capMid(p.openPrice), h = capMid(p.highPrice), l = capMid(p.lowPrice), c = capMid(p.closePrice);
+      if(o == null || h == null || l == null || c == null) continue;
+      const ts = p.snapshotTimeUTC ? Date.parse(p.snapshotTimeUTC + 'Z') : Date.parse(p.snapshotTime);
+      if(!isFinite(ts)) continue;
+      const sec = Math.floor(ts/1000);
+      if(sec < oldest) oldest = sec;
+      if(!seen.has(sec)){ seen.set(sec, { t:sec, o, h, l, c, v: p.lastTradedVolume || 0 }); added++; }
+    }
+    if(seen.size >= targetBars || added === 0 || !isFinite(oldest)) break;
+    toParam = capFmtDate(oldest - 1); // następna strona kończy się tuż przed najstarszą świecą
+    await new Promise(r => setTimeout(r, 400)); // łagodzimy limit historii Capital
+  }
+  const candles = Array.from(seen.values()).sort((a, b) => a.t - b.t);
+  if(candles.length < 10) throw new Error('za mało świec historii z Capital.com');
+  Net.last = 'Capital.com historia (' + candles.length + ')';
+  return candles;
+}
 export async function capitalTick(symbol){
   const epic = await capResolveEpic(symbol);
   const j = await capGet('/api/v1/markets/' + epic);

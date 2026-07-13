@@ -1111,7 +1111,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div style={{display:'flex', alignItems:'center', gap:9, marginBottom:8}}>
               <span style={{fontWeight:900, fontSize:16}}>⟲ Backtest silnika</span>
-              <span className="tag mono">{item.sym} · {tf.label} · {bt.res && bt.res.trainMeta ? bt.res.trainMeta.candles + ' świec' + (bt.res.trainMeta.extended ? ' (maks)' : '') : candlesSafe.length + ' świec (wykres)'}</span>
+              <span className="tag mono">{item.sym} · {tf.label} · {bt.res && bt.res.trainMeta ? bt.res.trainMeta.candles + ' świec' + (bt.res.trainMeta.source ? ' · ' + bt.res.trainMeta.source : '') : candlesSafe.length + ' świec (wykres)'}</span>
             </div>
             <div style={{overflowY:'auto', flex:1}}>
               <button className="chip sel mono"
@@ -1124,12 +1124,12 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   setBt({ busy:true, res:null });
                   /* [FIX] backtest na MAKSYMALNEJ historii (nie 5 dni z wykresu) —
                      żeby nie pokazywał „3 transakcji" na tak małej próbie */
-                  let cc = candlesSafe, cpack = { ind, emaData, hasVol }, cext = false;
+                  let cc = candlesSafe, cpack = { ind, emaData, hasVol }, cext = false, csrc = 'wykres';
                   if(tf.id !== 'D1'){
                     try{
                       const tc = await fetchTrainingCandles(item.sym, tf, candlesSafe);
                       if(tc.candles && tc.candles.length > candlesSafe.length){
-                        cc = tc.candles; cext = tc.extended;
+                        cc = tc.candles; cext = tc.extended; csrc = tc.source || 'wykres';
                         cpack = indicatorsFor(cc, tf.id) || cpack;
                       }
                     }catch(e){}
@@ -1137,7 +1137,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   setTimeout(() => {
                     const r = backtestEngine(cc, cpack.ind, cpack.emaData, cpack.hasVol, item.sym, prefs.minScore, prefs.smc,
                       { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
-                    r.trainMeta = { candles: cc.length, extended: cext };
+                    r.trainMeta = { candles: cc.length, extended: cext, source: csrc };
                     r.candlesUsed = cc;
                     setBt({ busy:false, res:r });
                   }, 40);
@@ -1155,10 +1155,10 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   Bus.show('⏳ Pobieram maksymalną historię do treningu…');
                   /* [FIX] trening na MAKSYMALNEJ historii Yahoo (nie 5 dni z wykresu) —
                      wprost mnoży podaż etykiet TP1/SL, które gatowały „za mało próbek" */
-                  let tc, tpack, trainCandles, ext = false;
+                  let tc, tpack, trainCandles, ext = false, tsrc = 'wykres';
                   try{
                     tc = await fetchTrainingCandles(item.sym, tf, candlesSafe);
-                    trainCandles = tc.candles; ext = tc.extended;
+                    trainCandles = tc.candles; ext = tc.extended; tsrc = tc.source || 'wykres';
                     tpack = indicatorsFor(trainCandles, tf.id);
                   }catch(e){ trainCandles = candlesSafe; tpack = { ind, emaData, hasVol }; }
                   if(!tpack || !trainCandles || trainCandles.length < 250){
@@ -1184,7 +1184,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                         totalNoos: wf.totalNoos,
                         oosPairsN: wf.oosPairsN, agg: wf.agg, payout: wf.payout,
                         regimeCoverage: wf.regimeCoverage, at: Date.now(),
-                        trainCandles: trainCandles.length, trainExtended: ext, // [FIX] ile świec i skąd
+                        trainCandles: trainCandles.length, trainExtended: ext, trainSource: tsrc, // [FIX] ile świec i skąd
                         /* [E3-5] odcisk danych treningowych: pierwsza/ostatnia świeca + n */
                         dataHash: trainCandles.length ? (trainCandles[0].t + '-' + trainCandles[trainCandles.length-1].t + '-' + trainCandles.length) : null,
                       };
@@ -1193,7 +1193,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       meta.modelV = saveModelVersion(item.sym, tf.id, { weights: wf.weights, calib: wf.calib || null, meta, knn: knnPayload });
                       Store.set('rt_model_meta', meta);
                       setWv(v => v + 1);
-                      Bus.show('🧠 k-fold OOS (' + trainCandles.length + ' świec' + (ext ? ', maks. historia' : '') + '): ' + wf.totalNoos + ' tr · med avgR ' + (wf.agg.avgR.med != null ? wf.agg.avgR.med : '—') + 'R'
+                      Bus.show('🧠 k-fold OOS (' + trainCandles.length + ' świec · ' + tsrc + '): ' + wf.totalNoos + ' tr · med avgR ' + (wf.agg.avgR.med != null ? wf.agg.avgR.med : '—') + 'R'
                         + (wf.agg.brier.p75 != null ? ' · Brier p75 ' + wf.agg.brier.p75 : '')
                         + ' · ' + stageLabel(meta));
                     } else if(wf && wf.samplesCollected != null){
@@ -1208,7 +1208,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                     const r = backtestEngine(trainCandles, tpack.ind, tpack.emaData, tpack.hasVol, item.sym, prefs.minScore, prefs.smc,
                       { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
                     r.wf = wf;
-                    r.trainMeta = { candles: trainCandles.length, extended: ext };
+                    r.trainMeta = { candles: trainCandles.length, extended: ext, source: tsrc };
                     r.candlesUsed = trainCandles;
                     setBt({ busy:false, res:r });
                   }, 40);

@@ -1,6 +1,6 @@
 import { Bus } from '../core/bus.js';
 import { Net, fetchJson } from '../core/net.js';
-import { CAP_MAP, capEnabled, capWarned, capitalChart, setCapWarned } from './capital.js';
+import { CAP_MAP, capEnabled, capWarned, capitalChart, capitalHistory, setCapWarned } from './capital.js';
 import { stooqDaily } from './stooq.js';
 import { yahooChart, TF_MAX_RANGE } from './yahoo.js';
 import { atrSeries, emaOver } from '../indicators/index.js';
@@ -132,16 +132,28 @@ function feedHealthNote(src, staleFlag){
    krótszą historię, a trening nie potrzebuje realtime). Fallback: świece
    z wykresu, gdy rozszerzony zakres zawiedzie. */
 export async function fetchTrainingCandles(symbol, tf, chartCandles){
+  const baseN = chartCandles ? chartCandles.length : 0;
+  /* 1) Capital.com — najgłębsza historia (paginacja po 1000), gdy LIVE włączone.
+     Yahoo intraday jest ograniczony do ~60 dni; Capital daje więcej etykiet. */
+  if(capEnabled() && CAP_MAP[symbol] && tf.id !== 'D1'){
+    try{
+      const candles = await capitalHistory(symbol, tf, 5000);
+      if(candles && candles.length > baseN){
+        return { candles, range: 'capital', extended: true, source: 'Capital.com' };
+      }
+    }catch(e){ /* spróbuj Yahoo */ }
+  }
+  /* 2) Yahoo — maksymalny zakres per interwał (fallback, bez konta Capital) */
   const maxRange = TF_MAX_RANGE[tf.id] || tf.range;
   if(maxRange && maxRange !== tf.range){
     try{
       const r = await yahooChart(symbol, { ...tf, range: maxRange });
-      if(r && r.candles && r.candles.length > (chartCandles ? chartCandles.length : 0)){
-        return { candles: r.candles, range: maxRange, extended: true };
+      if(r && r.candles && r.candles.length > baseN){
+        return { candles: r.candles, range: maxRange, extended: true, source: 'Yahoo ' + maxRange };
       }
     }catch(e){ /* padło rozszerzenie — użyj świec z wykresu */ }
   }
-  return { candles: chartCandles || [], range: tf.range, extended: false };
+  return { candles: chartCandles || [], range: tf.range, extended: false, source: 'wykres' };
 }
 
 /* wybór źródła: tylko realne dane na żywo (DEMO usunięte) */
