@@ -12,6 +12,30 @@ geometrycznych, analiza **Smart Money Concepts (SMC)**, silnik sygnałów
 
 ## Zmiany
 
+### v1.8.0 — 🏛 Instytucjonalny silnik rankingu strategii (moduł doradczy)
+
+- **14 detektorów strategii** ocenianych RÓWNOCZEŚNIE na każdej świecy, każdy
+  0–100%: Trend Following, Momentum/Expansion, Breakout (Donchian), Break &
+  Retest, Liquidity Sweep/Stop Hunt (ICT), Wyckoff Spring/Upthrust, Mean
+  Reversion, Order Block, FVG/Imbalance, Premium/Discount, VWAP pullback,
+  Volatility Squeeze, Session Open Drive (killzones), Pivot Points.
+- **Wielointerwałowość**: świece agregowane do M15/M30/H1/H4/D1 z wagami;
+  zgodność MTF premiowana, kontra karana. Ramki bez wystarczającej historii
+  są pomijane (bez udawania).
+- **Werdykt**: LONG / SHORT / **BRAK TRANSAKCJI** (poniżej progu przewagi
+  wejście nie jest wymuszane — brak pozycji to poprawna decyzja). Entry, SL,
+  **TP1–TP4**, trailing strukturalny, R:R, szacunek P(win), Confidence oraz
+  sub-scores: struktura/trend/momentum/płynność/zmienność/ryzyko.
+- **Explain AI**: dlaczego ta strategia, dlaczego odrzucone pozostałe, co
+  unieważni analizę, jakie warunki muszą być spełnione, co zwiększy szansę.
+- **System uczenia**: wyniki paper otwartych z rankingu (pole `strategy`)
+  korygują scoring z twardym **shrinkage** (min 10 tr na jakąkolwiek korektę,
+  pełna siła dopiero przy dziesiątkach transakcji — anty-overfitting).
+- **Uczciwe granice**: moduł DORADCZY (auto-trade nadal na zwalidowanym
+  silniku k-fold — parytet validate↔serve); Order Flow/DOM/Footprint/delta
+  wymagają danych tick/L2, których feed nie dostarcza — nie są symulowane;
+  scoring to heurystyka, kalibracja tylko z własnej historii ≥30 tr.
+
 ### v1.7.0 — Etap 4 audytu: zarządzanie kapitałem (portfel)
 
 - **[E4-1]** Portfolio Risk Engine: cap sumy ryzyka (2%), skalowanie/blokada

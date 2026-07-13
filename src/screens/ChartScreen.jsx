@@ -23,6 +23,7 @@ import { computeSignal, indicatorsFor } from '../signals/engine.js';
 import { displacement } from '../smc/index.js';
 import { portfolioCheck } from '../signals/portfolio.js';
 import { buildPaperEntry } from '../data/paperEntry.js';
+import { buildStrategyCtx, rankStrategies } from '../strategies/engine.js';
 import { fmtClock, fmtFull, fmtPct, fmtPrice, fmtVol } from '../utils/format.js';
 import { notifyUser } from '../utils/notify.js';
 
@@ -37,6 +38,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const [showAi, setShowAi] = useState(false);
   const [aiState, setAiState] = useState({ busy:false, res:null, err:null, at:null, provider:null });
   const [showBt, setShowBt] = useState(false);
+  const [showStrat, setShowStrat] = useState(false); // 🏛 ranking strategii
   const [ticket, setTicket] = useState(null);
   const [bt, setBt] = useState({ busy:false, res:null });
   const [wv, setWv] = useState(0); // wersja wag modelu (bump po treningu → recompute)
@@ -298,6 +300,17 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     if(prefs.minProb != null) srWithHtf.__minProb = prefs.minProb;
     return computeSignal(candlesSafe, ind, emaData, patterns, hasVol, null, srWithHtf);
   }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.minProb, prefs.waitPullback, prefs.smc, item.sym, wv]);
+  /* 🏛 Instytucjonalny ranking strategii — moduł DORADCZY obok zwalidowanego
+     silnika (auto-trade nadal decyduje computeSignal; parytet validate↔serve).
+     Przeliczany z każdą świecą/tickiem jak signal. */
+  const stratRank = useMemo(() => {
+    if(!ind || candlesSafe.length < 60) return null;
+    try{
+      const ctx = buildStrategyCtx(candlesSafe, ind, emaData, hasVol, item.sym, TF_SEC[tf.id] || 300, null);
+      return ctx ? rankStrategies(ctx, journal) : null;
+    }catch(e){ return null; }
+  }, [ind, candlesSafe, emaData, hasVol, item.sym, tf.id, journal]);
+
   /* najlepsza „okazja" poza samym aktywnym sygnałem (do paska i alertu) */
   const topOpp = useMemo(() => {
     const ops = signal && signal.opportunities;
@@ -409,8 +422,9 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
 
   /* [E4-1] każde otwarcie paper przechodzi przez Portfolio Risk Engine
      (cap sumaryczny, korelacje, VaR-lite) — zastępuje klasowe proxy z [A5] */
-  const tryOpenPaper = (dir, entry, sl, tp1, tp2, srcTag, score, eq, sig) => {
+  const tryOpenPaper = (dir, entry, sl, tp1, tp2, srcTag, score, eq, sig, extra) => {
     const e = makePaper(dir, entry, sl, tp1, tp2, srcTag, score, eq, sig);
+    if(extra) Object.assign(e, extra); // np. strategy — zasila uczenie rankingu
     const open = journal
       .filter(x => x.paper && x.result === 'open')
       .map(x => ({ sym: x.sym, dir: x.dir, riskPct: x.riskPct != null ? x.riskPct : 0.5 }));
@@ -623,6 +637,8 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
           onClick={() => setShowAi(true)}>✦ AI</button>
         <button className="chip mono" style={{color:'var(--ema9)', borderColor:'rgba(255,201,77,.35)'}}
           onClick={() => setShowBt(true)}>⟲ BACKTEST</button>
+        <button className="chip mono" style={{color:'#c792ff', borderColor:'rgba(199,146,255,.4)'}}
+          onClick={() => setShowStrat(true)}>🏛 RANKING{stratRank && stratRank.verdict !== 'BRAK TRANSAKCJI' ? ' · ' + stratRank.verdict : ''}</button>
         {[['form','ZNACZNIKI'],['boll','BB'],['vwap','VWAP'],['sr','S/R']].map(([k, l]) => (
           <button key={k} className={'chip mono' + (iprefs[k] ? ' sel' : ' off')}
             onClick={() => toggleOverlay(k)}>{l}</button>
@@ -1106,6 +1122,102 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
         </div>
       )}
 
+
+      {showStrat && (
+        <div className="modal-bg" onClick={() => setShowStrat(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div style={{display:'flex', alignItems:'center', gap:9, marginBottom:6}}>
+              <span style={{fontWeight:900, fontSize:16}}>🏛 Ranking strategii</span>
+              <span className="tag mono">{item.sym} · {tf.label}</span>
+              <span className="spacer" />
+              {stratRank && <span className="mono" style={{fontSize:10.5, color:'var(--dim2)'}}>{stratRank.regime} · {stratRank.session}</span>}
+            </div>
+            <div style={{overflowY:'auto', flex:1}}>
+              {!stratRank && <div style={{fontSize:13, color:'var(--dim2)', padding:'20px 4px'}}>Poczekaj na dane wykresu (min 60 świec).</div>}
+              {stratRank && (
+                <>
+                  {/* WERDYKT */}
+                  <div style={{background:'var(--bg)', border:'1px solid ' + (stratRank.dir > 0 ? 'rgba(47,214,174,.45)' : stratRank.dir < 0 ? 'rgba(255,107,94,.45)' : 'var(--border2)'), borderRadius:12, padding:'10px 12px', marginBottom:8}}>
+                    <div style={{display:'flex', alignItems:'baseline', gap:10}}>
+                      <span style={{fontWeight:900, fontSize:20, color: stratRank.dir > 0 ? 'var(--up)' : stratRank.dir < 0 ? 'var(--down)' : 'var(--dim)'}}>{stratRank.verdict}</span>
+                      {stratRank.best && <span style={{fontSize:12, fontWeight:700, color:'var(--text)'}}>{stratRank.best.name}</span>}
+                      <span className="spacer" />
+                      {stratRank.best && <span className="mono" style={{fontSize:12, fontWeight:800, color:'#c792ff'}}>{stratRank.confidence}%</span>}
+                    </div>
+                    {stratRank.levels && (
+                      <div className="mono" style={{fontSize:11.5, marginTop:6, lineHeight:1.7}}>
+                        <div>Entry <b>{fmtPrice(stratRank.levels.entry)}</b> · SL <b style={{color:'var(--down)'}}>{fmtPrice(stratRank.levels.sl)}</b> · R:R {stratRank.expectedRR}</div>
+                        <div>TP1 {fmtPrice(stratRank.levels.tp1)} · TP2 {fmtPrice(stratRank.levels.tp2)} · TP3 {fmtPrice(stratRank.levels.tp3)} · TP4 {fmtPrice(stratRank.levels.tp4)}</div>
+                        <div style={{color:'var(--dim2)'}}>trailing: {stratRank.levels.trailing}</div>
+                        <div>P(win) ~{Math.round(stratRank.probability*100)}% <span style={{color:'var(--dim2)'}}>({stratRank.probabilitySrc})</span></div>
+                      </div>
+                    )}
+                    {stratRank.dir !== 0 && stratRank.levels
+                      && !journal.some(e => e.paper && (e.result === 'open' || e.result === 'pending') && e.sym === item.sym) && (
+                      <button className="chip mono sel" style={{width:'100%', justifyContent:'center', padding:'10px', marginTop:8, fontSize:13,
+                        color: stratRank.dir > 0 ? 'var(--up)' : 'var(--down)'}}
+                        onClick={() => {
+                          const L = stratRank.levels;
+                          if(tryOpenPaper(stratRank.dir, L.entry, L.sl, L.tp1, L.tp2, 'strategy:' + stratRank.best.id, stratRank.confidence, null, signal, { strategy: stratRank.best.id })){
+                            Bus.show('▶ Paper z rankingu: ' + stratRank.best.name + ' — wynik zasili uczenie strategii');
+                            setShowStrat(false);
+                          }
+                        }}>▶ Otwórz paper wg tej strategii</button>
+                    )}
+                  </div>
+
+                  {/* SUB-SCORES */}
+                  <div style={{display:'flex', gap:5, flexWrap:'wrap', marginBottom:8}}>
+                    {[['Struktura', stratRank.scores.marketStructure], ['Trend', stratRank.scores.trend], ['Momentum', stratRank.scores.momentum],
+                      ['Płynność', stratRank.scores.liquidity], ['Zmienność', stratRank.scores.volatility], ['Ryzyko', stratRank.scores.risk]].map(([l, v], k) => (
+                      <span key={k} className="mono" style={{fontSize:10.5, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)',
+                        color: l === 'Ryzyko' ? (v > 60 ? 'var(--down)' : 'var(--dim)') : (v >= 65 ? 'var(--up)' : v <= 35 ? 'var(--down)' : 'var(--dim)')}}>{l} {v}</span>
+                    ))}
+                    {stratRank.mtf && stratRank.mtf.frames.length > 0 && (
+                      <span className="mono" style={{fontSize:10.5, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid rgba(199,146,255,.35)', color:'#c792ff'}}>
+                        MTF {stratRank.mtf.align > 0 ? '▲' : stratRank.mtf.align < 0 ? '▼' : '•'} {stratRank.mtf.frames.map(f => f.id + (f.dir > 0 ? '↑' : f.dir < 0 ? '↓' : '·')).join(' ')}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* RANKING */}
+                  <div className="section-label" style={{padding:'4px 0'}}>Ranking wykrytych strategii</div>
+                  {stratRank.ranking.length === 0 && <div style={{fontSize:12, color:'var(--dim2)', padding:'6px 2px'}}>Żaden detektor nie widzi aktywnego setupu na tej świecy.</div>}
+                  {stratRank.ranking.map((r, k) => (
+                    <div key={k} style={{display:'flex', alignItems:'center', gap:8, padding:'5px 2px', borderBottom:'1px solid var(--border)'}}>
+                      <span className="mono" style={{width:16, color:'var(--dim2)', fontSize:11}}>{k+1}.</span>
+                      <span style={{color: r.dir > 0 ? 'var(--up)' : 'var(--down)', fontWeight:900, width:14}}>{r.dir > 0 ? '▲' : '▼'}</span>
+                      <span style={{flex:1, fontSize:12.5, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{r.name}</span>
+                      <span className="sgauge" style={{width:52}}><i style={{width: r.score + '%', background: r.score >= 60 ? '#c792ff' : '#8fb0ac'}} /></span>
+                      <span className="mono" style={{fontSize:12, fontWeight:800, width:38, textAlign:'right', color: r.score >= 60 ? '#c792ff' : 'var(--dim)'}}>{r.score}%</span>
+                    </div>
+                  ))}
+
+                  {/* EXPLAIN AI */}
+                  <div className="section-label" style={{padding:'10px 0 4px'}}>Explain AI — dlaczego ta decyzja</div>
+                  <div style={{background:'var(--bg)', border:'1px solid var(--border)', borderRadius:12, padding:'9px 12px', fontSize:12, lineHeight:1.65}}>
+                    {stratRank.explain.why.map((w, k) => <div key={'w'+k}>• {w}</div>)}
+                    {stratRank.explain.rejected && stratRank.explain.rejected.length > 0 && (
+                      <div style={{marginTop:6}}><b style={{color:'var(--dim)'}}>Odrzucone / niżej:</b>{stratRank.explain.rejected.map((t, k) => <div key={'r'+k} style={{color:'var(--dim2)'}}>· {t}</div>)}</div>
+                    )}
+                    {stratRank.explain.invalidates && (
+                      <div style={{marginTop:6}}><b style={{color:'var(--down)'}}>Unieważni analizę:</b>{stratRank.explain.invalidates.map((t, k) => <div key={'i'+k} style={{color:'var(--dim2)'}}>· {t}</div>)}</div>
+                    )}
+                    {(stratRank.explain.conditions || stratRank.explain.watch) && (
+                      <div style={{marginTop:6}}><b style={{color:'var(--up)'}}>Warunki / co obserwować:</b>{(stratRank.explain.conditions || stratRank.explain.watch).map((t, k) => <div key={'c'+k} style={{color:'var(--dim2)'}}>· {t}</div>)}</div>
+                    )}
+                    {stratRank.explain.improves && (
+                      <div style={{marginTop:6}}><b style={{color:'var(--cyan)'}}>Zwiększy prawdopodobieństwo:</b>{stratRank.explain.improves.map((t, k) => <div key={'p'+k} style={{color:'var(--dim2)'}}>· {t}</div>)}</div>
+                    )}
+                  </div>
+
+                  <div style={{marginTop:10, fontSize:10.5, color:'var(--dim2)', lineHeight:1.6}}>{stratRank.disclaimer}</div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {showBt && (
         <div className="modal-bg" onClick={() => setShowBt(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
