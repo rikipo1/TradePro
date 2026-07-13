@@ -4,7 +4,8 @@ import { DEFAULT_PREFS, DEFAULT_SMC, DEFAULT_WL } from './constants/defaults.js'
 import { Bus } from './core/bus.js';
 import { Store } from './core/store.js';
 import { CAP_MAP, CapCfg, CapSess, capEnabled, capitalTick, setCapWarned } from './data/capital.js';
-import { fetchQuotes } from './data/feed.js';
+import { fetchQuotes, getChart } from './data/feed.js';
+import { atrSeries } from './indicators/index.js';
 import { paperFloating, resolvePaperList } from './data/paper.js';
 import { TFS } from './data/yahoo.js';
 import { ChartScreen } from './screens/ChartScreen.jsx';
@@ -88,7 +89,7 @@ export function App(){
     Bus.show('📒 ' + msg);
     notifyUser('Rikipo Paper', msg);
   };
-  const resolveTick = (sym, px) => setJournal(list => resolvePaperList(list, sym, px, paperNote) || list);
+  const resolveTick = (sym, px, opts) => setJournal(list => resolvePaperList(list, sym, px, paperNote, opts) || list);
 
   /* [A5] ostatnie znane ceny z monitora — do floating risk na poziomie konta */
   const lastPxRef = useRef({});
@@ -140,7 +141,34 @@ export function App(){
             if(r && r[sym] && r[sym].price != null) px = r[sym].price;
           }catch(e){}
         }
-        if(px != null){ lastPxRef.current[sym] = px; resolveTick(sym, px); }
+        if(px == null) continue;
+        lastPxRef.current[sym] = px;
+        /* [E3-4/C4] świece z TEGO SAMEGO źródła co wykres → trailing
+           strukturalny w paper identyczny z backtestem (cache w net.js
+           minimalizuje koszt; przy braku danych zostaje 1R + trailApprox) */
+        let trailOpts;
+        try{
+          const ent = openP.find(e => e.sym === sym && e.result === 'open');
+          const tfObj = ent && ent.tf ? TFS.find(t => t.id === ent.tf) : null;
+          if(tfObj){
+            const ch = await getChart(sym, tfObj, prefs.source);
+            const cs = ch && ch.candles;
+            if(cs && cs.length >= 20){
+              const last8 = cs.slice(-8);
+              const atrArr = atrSeries(cs.slice(-60), 14);
+              let atr = null;
+              for(let q=atrArr.length-1;q>=0;q--){ if(atrArr[q] != null){ atr = atrArr[q]; break; } }
+              if(atr != null){
+                trailOpts = {
+                  atr,
+                  trailLow: Math.min(...last8.map(c => c.l)),
+                  trailHigh: Math.max(...last8.map(c => c.h)),
+                };
+              }
+            }
+          }
+        }catch(e){}
+        resolveTick(sym, px, trailOpts);
       }
     }, 15000);
     return () => clearInterval(h);

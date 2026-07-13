@@ -14,7 +14,7 @@ export function paperFloating(e, px){
   return +base.toFixed(2);
 }
 
-export function resolvePaperList(list, sym, px, notify){
+export function resolvePaperList(list, sym, px, notify, opts){
   let changed = false;
   const out = list.map(e => {
     if(!e.paper || e.sym !== sym || !e.risk) return e;
@@ -89,9 +89,19 @@ export function resolvePaperList(list, sym, px, notify){
         if(notify) notify(done);
         return done;
       }
-      const trail = d === 1 ? px - e.risk : px + e.risk;      // trailing 1R za ceną
+      /* [E3-4/C4] trailing STRUKTURALNY jak w backteście (8-świecowy dołek/
+         szczyt ± 0.25·ATR), gdy monitor dostarczy świece; inaczej 1R za ceną
+         + flaga trailApprox (rozjazd paper↔backtest widoczny w raporcie E3-2) */
       const cur = ne.slDyn != null ? ne.slDyn : (e.slDyn != null ? e.slDyn : e.sl);
+      let trail, structural = false;
+      if(opts && opts.atr != null && (d === 1 ? opts.trailLow != null : opts.trailHigh != null)){
+        trail = d === 1 ? opts.trailLow - opts.atr * 0.25 : opts.trailHigh + opts.atr * 0.25;
+        structural = true;
+      } else {
+        trail = d === 1 ? px - e.risk : px + e.risk;
+      }
       if(d === 1 ? trail > cur : trail < cur){ bump(); ne.slDyn = trail; }
+      if(!!e.trailApprox !== !structural){ bump(); ne.trailApprox = !structural; }
     }
     if(mut){ changed = true; return ne; }
     return e;

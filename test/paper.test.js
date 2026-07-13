@@ -29,6 +29,23 @@ test('[A7] TP2 z kosztem: r = banked + 0.5·rr2 − costR', () => {
   assert.ok(Math.abs(out[0].r - 1.95) < 1e-9, 'r=' + out[0].r);
 });
 
+test('[E3-4] runner z opts strukturalnymi: trailing jak w backteście', () => {
+  const e = baseEntry({ stage: 'runner', banked: 0.75, slDyn: 100 });
+  const out = resolvePaperList([e], 'X', 101.8, null, { atr: 0.4, trailLow: 101.2, trailHigh: 102 });
+  assert.ok(out, 'zmiana slDyn');
+  // trail = trailLow − 0.25·ATR = 101.2 − 0.1 = 101.1 > 100
+  assert.ok(Math.abs(out[0].slDyn - 101.1) < 1e-9, 'slDyn=' + out[0].slDyn);
+  assert.equal(!!out[0].trailApprox, false, 'flaga trailApprox znika przy świecach');
+});
+
+test('[E3-4] runner bez opts: trailing 1R + flaga trailApprox (regresja)', () => {
+  const e = baseEntry({ stage: 'runner', banked: 0.75, slDyn: 100 });
+  const out = resolvePaperList([e], 'X', 101.8, null);
+  // trail = px − risk = 100.8 > 100
+  assert.ok(Math.abs(out[0].slDyn - 100.8) < 1e-9, 'slDyn=' + out[0].slDyn);
+  assert.equal(out[0].trailApprox, true);
+});
+
 test('paperFloating: runner liczy banked + połowę biegu', () => {
   const e = baseEntry({ stage: 'runner', banked: 0.75 });
   assert.ok(Math.abs(paperFloating(e, 102) - (0.75 + 0.5 * 2)) < 1e-9);
