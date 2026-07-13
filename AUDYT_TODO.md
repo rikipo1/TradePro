@@ -44,8 +44,8 @@ w k-fold (parytet validate↔serve). Backtest zawsze pesymistyczny.
 
 ## ETAP 4 — zarządzanie kapitałem (v1.7.0)
 
-- [ ] **E4-1** Portfolio Risk Engine (korelacje, cap sumaryczny, VaR-lite)
-- [ ] **E4-2** Capital Allocation (scale z portfolioCheck, tryb obronny)
-- [ ] **E4-3** Adaptive Learning Control (walidacja zmian parametrów + rollback)
-- [ ] **E4-4** Decision Journal — komplet pól + eksport JSON
-- [ ] **E4-5** Finalna walidacja i raport (`docs/RAPORT_KONCOWY.md`)
+- [x] **E4-1** Portfolio Risk Engine (korelacje, cap sumaryczny, VaR-lite)
+- [x] **E4-2** Capital Allocation (scale z portfolioCheck, tryb obronny)
+- [x] **E4-3** Adaptive Learning Control (walidacja zmian parametrów + rollback)
+- [x] **E4-4** Decision Journal — komplet pól + eksport JSON
+- [x] **E4-5** Finalna walidacja i raport (`docs/RAPORT_KONCOWY.md`)

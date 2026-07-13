@@ -12,6 +12,20 @@ geometrycznych, analiza **Smart Money Concepts (SMC)**, silnik sygnałów
 
 ## Zmiany
 
+### v1.7.0 — Etap 4 audytu: zarządzanie kapitałem (portfel)
+
+- **[E4-1]** Portfolio Risk Engine: cap sumy ryzyka (2%), skalowanie/blokada
+  pozycji skorelowanych (|ρ|>0.7), parametryczny VaR-lite (limit 3%) —
+  każde otwarcie paper przechodzi przez `portfolioCheck`.
+- **[E4-2]** sizing z kosztem (edge − costR), skalą portfelową i **trybem
+  obronnym** (drawdown > 5R ⇒ ryzyko ×0.5).
+- **[E4-3]** Adaptive Learning Control: zmienione progi SMC wymagają
+  walidacji k-fold vs stare na tych samych świecach; gorsze ⇒ auto-rollback.
+- **[E4-4]** Decision Journal — komplet pól (sesja, snapshot czynników,
+  modelV…) + eksport JSON dziennika.
+- **[E4-5]** `docs/RAPORT_KONCOWY.md` — finalna walidacja; rekomendacja:
+  **PAPER ONLY** (uzasadnienie liczbami).
+
 ### v1.6.0 — Etap 3 audytu: monitoring, walidacja ciągła, wykonanie
 
 - **[E3-1]** Monitoring Engine: rolling stats z dziennika vs walidacja k-fold,
