@@ -49,6 +49,19 @@ test('sanity: syntetyczna seria daje co najmniej jeden aktywny sygnał', () => {
   assert.ok(activeIdx > 0, 'brak sygnału dir≠0 w serii testowej');
 });
 
+test('[A3] wagi działają TYLKO z __reliable — parytet skaner↔wykres', () => {
+  assert.ok(activeIdx > 0);
+  const skewed = { bias: 1.4, trend: 2.0, momentum: -1.5, location: 0.9, liquidity: 0.1, confirmation: 1.2, htf: 0.5 };
+  const noModel = signalAt(candles, pack, activeIdx);
+  const weightsNoRel = signalAt(candles, pack, activeIdx, { __weights: skewed });
+  const weightsRel = signalAt(candles, pack, activeIdx, { __weights: skewed, __reliable: true });
+  assert.equal(weightsNoRel.prob, noModel.prob, 'bez __reliable wagi ignorowane');
+  assert.notEqual(weightsRel.prob, noModel.prob, 'z __reliable odchylone wagi zmieniają prob');
+  // identyczne dane + model ⇒ identyczny prob z obu ścieżek (skaner/wykres)
+  const again = signalAt(candles, pack, activeIdx, { __weights: skewed, __reliable: true });
+  assert.equal(again.prob, weightsRel.prob);
+});
+
 test('[A2] kNN poza torem decyzyjnym: __knn nie zmienia out.prob', () => {
   assert.ok(activeIdx > 0);
   const rnd = mulberry32(5);

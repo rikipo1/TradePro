@@ -269,6 +269,9 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     srWithHtf.__weights = Store.get('rt_model_weights', null);
     srWithHtf.__calib = Store.get('rt_model_calib', null);
     srWithHtf.__knn = Store.get('rt_knn_history', null);
+    const mMeta = Store.get('rt_model_meta', null);
+    srWithHtf.__reliable = !!(mMeta && mMeta.reliable); // [A3] parytet skaner↔wykres
+    srWithHtf.__payout = mMeta ? (mMeta.payout || null) : null; // [A4] EV empiryczne
     if(prefs.minProb != null) srWithHtf.__minProb = prefs.minProb;
     return computeSignal(candlesSafe, ind, emaData, patterns, hasVol, null, srWithHtf);
   }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.minProb, prefs.waitPullback, prefs.smc, item.sym, wv]);

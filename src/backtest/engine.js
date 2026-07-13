@@ -92,7 +92,9 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
     if(sym) zonesI.__sym = sym;
     if(minScore != null) zonesI.__minScore = minScore;
     if(smcCfg) zonesI.__smc = smcCfg;
-    if(weights) zonesI.__weights = weights;
+    /* [A3] backtest z jawnie podanym modelem = przebieg walidacyjny tego modelu;
+       __reliable włącza go w computeSignal dokładnie jak w torze live */
+    if(weights){ zonesI.__weights = weights; zonesI.__reliable = true; }
     if(calib) zonesI.__calib = calib;
     if(opts && opts.knn) zonesI.__knn = opts.knn;
     /* K2: HTF liczony PRZYCZYNOWO per świeca — dokładnie jak live. Bez tego

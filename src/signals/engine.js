@@ -296,7 +296,10 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     relVol: relVol ? { ...relVol, dir: (c.c >= c.o ? 1 : -1) } : null,
     htfDir, liquidity: liq,
   });
-  const weights = (srOverride && srOverride.__weights) || null;
+  /* [A3] wagi/kalibracja TYLKO przy jawnym __reliable — bez tego skaner tła
+     i wykres mogłyby liczyć na różnych modelach (alert ≠ sygnał na wykresie) */
+  const modelOn = !!(srOverride && srOverride.__reliable && srOverride.__weights);
+  const weights = modelOn ? srOverride.__weights : null;
 
   let dir = factors.dirConsensus > 0.06 ? 1 : factors.dirConsensus < -0.06 ? -1 : 0;
 
@@ -305,7 +308,7 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   if(dir === -1 && bearPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — SHORT odrzucony'); }
 
   /* P(win | dir) z modelu + kalibracja isotonic (jeśli wyuczona z ≥150 próbek) */
-  const calibMap = (srOverride && srOverride.__calib) || null;
+  const calibMap = modelOn ? (srOverride.__calib || null) : null;
   let prob = dir !== 0 ? predictProb(orientedVector(factors, dir), weights) : 0.5;
   if(dir !== 0 && calibMap) prob = applyIsotonic(prob, calibMap);
 
@@ -554,7 +557,7 @@ export function indicatorsFor(candles, tfId){
   for(let i=0;i<EMA_DEFS.length;i++){ emaData[EMA_DEFS[i].n] = emaSeries(closes, EMA_DEFS[i].n); }
   return { ind, emaData, hasVol };
 }
-export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, smcCfg, weights, calib){
+export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, smcCfg, weights, calib, reliable, payout){
   const data = await getChart(symbol, tf, source);
   if(!data || !data.candles || data.candles.length < 30) return { data, signal:null };
   const pack = indicatorsFor(data.candles, tf.id);
@@ -572,6 +575,9 @@ export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, 
   srWithHtf.__smc = smcCfg || null;
   srWithHtf.__weights = weights || null;
   srWithHtf.__calib = calib || null;
+  /* [A3] skaner tła musi używać modelu na tych samych zasadach co wykres */
+  srWithHtf.__reliable = !!reliable && !!weights;
+  srWithHtf.__payout = payout || null;
   const signal = computeSignal(data.candles, pack.ind, pack.emaData, patterns, pack.hasVol, null, srWithHtf);
   return { data, signal, demo: !!data.demo };
 }
