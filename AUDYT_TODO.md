@@ -33,14 +33,14 @@ w k-fold (parytet validate↔serve). Backtest zawsze pesymistyczny.
 
 ## ETAP 3 — monitoring, walidacja ciągła, wykonanie (v1.6.0)
 
-- [ ] **E3-1** Monitoring Engine (rollingStats, degradation, auto-revert,
+- [x] **E3-1** Monitoring Engine (rollingStats, degradation, auto-revert,
       bramka stale)
-- [ ] **E3-2** Raport Shadow-vs-Backtest (`compareShadow`)
-- [ ] **E3-3** Poślizg SL + spread dynamiczny (slipAtr per klasa, koszt ×4
+- [x] **E3-2** Raport Shadow-vs-Backtest (`compareShadow`)
+- [x] **E3-3** Poślizg SL + spread dynamiczny (slipAtr per klasa, koszt ×4
       w oknie makro, auto-trade zablokowany w oknie makro)
-- [ ] **E3-4** C4 — świece do trailingu strukturalnego w paper
-- [ ] **E3-5** Wersjonowanie modelu + rollback (Model Risk Governance)
-- [ ] **E3-6** Refaktor computeSignal (gates.js / levels.js) z golden testami
+- [x] **E3-4** C4 — świece do trailingu strukturalnego w paper
+- [x] **E3-5** Wersjonowanie modelu + rollback (Model Risk Governance)
+- [x] **E3-6** Refaktor computeSignal (gates.js / levels.js) z golden testami
 
 ## ETAP 4 — zarządzanie kapitałem (v1.7.0)
 

@@ -12,6 +12,23 @@ geometrycznych, analiza **Smart Money Concepts (SMC)**, silnik sygnałów
 
 ## Zmiany
 
+### v1.6.0 — Etap 3 audytu: monitoring, walidacja ciągła, wykonanie
+
+- **[E3-1]** Monitoring Engine: rolling stats z dziennika vs walidacja k-fold,
+  automatyczny **revert do wag domyślnych** przy degradacji; twarda bramka
+  świeżości danych (`{stale:true}` przy świecach starszych niż 2×TF+90 s);
+  licznik świeżości per źródło w INFO.
+- **[E3-2]** raport **Shadow-vs-Backtest** w dzienniku z automatycznym
+  werdyktem (OK / NIEWYJAŚNIONA — nie zwiększaj zaufania).
+- **[E3-3]** poślizg SL w backteście (slipAtr per klasa), koszt spreadu ×4
+  w oknach makro, **auto-trade zablokowany w oknie makro**.
+- **[E3-4]** trailing strukturalny w paper (świece w monitorze pozycji;
+  flaga `trailApprox` znika, gdy dane dostępne).
+- **[E3-5]** wersjonowanie modelu (max 3, FIFO) + rollback z UI; `modelV`
+  w dzienniku.
+- **[E3-6]** refaktor computeSignal na `gates.js`/`levels.js` z golden
+  testami 1:1 (zero zmiany zachowania).
+
 ### v1.5.0 — Etap 2 audytu: jakość sygnałów
 
 - **[E2-1]** harness ablacyjny (`scripts/ablation.js`, flagi `__ablate`,
