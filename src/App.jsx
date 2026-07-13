@@ -5,7 +5,7 @@ import { Bus } from './core/bus.js';
 import { Store } from './core/store.js';
 import { CAP_MAP, CapCfg, CapSess, capEnabled, capitalTick, setCapWarned } from './data/capital.js';
 import { fetchQuotes } from './data/feed.js';
-import { resolvePaperList } from './data/paper.js';
+import { paperFloating, resolvePaperList } from './data/paper.js';
 import { TFS } from './data/yahoo.js';
 import { ChartScreen } from './screens/ChartScreen.jsx';
 import { InfoScreen } from './screens/InfoScreen.jsx';
@@ -89,6 +89,20 @@ export function App(){
   };
   const resolveTick = (sym, px) => setJournal(list => resolvePaperList(list, sym, px, paperNote) || list);
 
+  /* [A5] ostatnie znane ceny z monitora — do floating risk na poziomie konta */
+  const lastPxRef = useRef({});
+  const liveRisk = (jl, pxOverride) => {
+    let fl = 0, oc = 0;
+    (jl || journal).forEach(e => {
+      if(!(e.paper && e.result === 'open')) return;
+      oc++;
+      const px = (pxOverride && pxOverride[e.sym] != null) ? pxOverride[e.sym] : lastPxRef.current[e.sym];
+      const f = paperFloating(e, px);
+      if(f != null) fl += f;
+    });
+    return { floatingR: +fl.toFixed(2), openCount: oc };
+  };
+
   /* monitor otwartych pozycji paper (co 15 s, także poza aktywnym wykresem) */
   useEffect(() => {
     const h = setInterval(async () => {
@@ -110,7 +124,7 @@ export function App(){
             if(r && r[sym] && r[sym].price != null) px = r[sym].price;
           }catch(e){}
         }
-        if(px != null) resolveTick(sym, px);
+        if(px != null){ lastPxRef.current[sym] = px; resolveTick(sym, px); }
       }
     }, 15000);
     return () => clearInterval(h);
@@ -239,7 +253,7 @@ export function App(){
     <div className="app">
       {screen === 'list' && <WatchlistScreen wl={wl} setWl={setWl} openChart={openChart} prefs={prefs} setPrefs={setPrefs} />}
       {screen === 'chart' && active && (
-        <ChartScreen item={active} onBack={() => setScreen('list')} prefs={prefs} setPrefs={setPrefs} ai={ai} setAi={setAi} addJournal={addJournal} journal={journal} resolveTick={resolveTick} />
+        <ChartScreen item={active} onBack={() => setScreen('list')} prefs={prefs} setPrefs={setPrefs} ai={ai} setAi={setAi} addJournal={addJournal} journal={journal} resolveTick={resolveTick} liveRisk={liveRisk} />
       )}
       {screen === 'journal' && <JournalScreen journal={journal} setJournal={setJournal} />}
       {screen === 'info' && <InfoScreen prefs={prefs} setPrefs={setPrefs} ai={ai} setAi={setAi} cap={cap} setCap={setCap} wl={wl} setWl={setWl} journal={journal} setJournal={setJournal} />}

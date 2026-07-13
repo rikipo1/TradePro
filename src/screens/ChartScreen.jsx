@@ -15,10 +15,11 @@ import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, mac
 import { detectPatterns } from '../patterns/index.js';
 import { computeSignal } from '../signals/engine.js';
 import { displacement } from '../smc/index.js';
+import { instrClass } from '../constants/instruments.js';
 import { fmtClock, fmtFull, fmtPct, fmtPrice, fmtVol } from '../utils/format.js';
 import { notifyUser } from '../utils/notify.js';
 
-export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJournal, journal, resolveTick }){
+export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJournal, journal, resolveTick, liveRisk }){
   const tf = TFS.find(t => t.id === prefs.tf) || TFS[1];
   const [data, setData] = useState({ candles:[], price:null, prev:null, demo:false });
   const [loading, setLoading] = useState(false);
@@ -378,14 +379,24 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const aiRisks = (aiRes && Array.isArray(aiRes.key_risks)) ? aiRes.key_risks.slice(0, 3) : [];
 
   /* paper trading — pomocnicy */
-  const makePaper = (dir, entry, sl, tp1, tp2, srcTag, score, eq) => {
+  const makePaper = (dir, entry, sl, tp1, tp2, srcTag, score, eq, sig) => {
     const risk = Math.abs(entry - sl);
+    /* [A5] M4-proxy: otwarta pozycja INNEGO symbolu tej samej klasy w tym
+       samym kierunku ⇒ ryzyko ×0.5 (pełna macierz korelacji → Etap 4) */
+    let riskPct = sig && sig.sizing ? sig.sizing.riskPct : null;
+    let note;
+    if(riskPct != null){
+      const cls = instrClass(item.sym);
+      const dupCls = journal.some(e => e.paper && e.result === 'open' && e.sym !== item.sym && e.dir === dir && instrClass(e.sym) === cls);
+      if(dupCls){ riskPct = +(riskPct * 0.5).toFixed(2); note = 'ryzyko ×0.5 — skorelowana klasa (' + cls + ')'; }
+    }
     return {
       id: Date.now(), ts: Date.now(), sym:item.sym, name:item.name, tf:tf.id,
       dir, entry, sl, tp1, tp2, risk,
       rr1: +(Math.abs(tp1 - entry) / Math.max(risk, 1e-9)).toFixed(2),
       result:'open', r:0, paper:true, src:(srcTag || 'manual'), score:(score != null ? score : null),
       entryQuality: eq || null,
+      riskPct, note,
     };
   };
   /* zlecenie LIMIT w strefę okazji (paper): czeka aż cena DOJDZIE do wejścia,
@@ -467,12 +478,13 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       Bus.show((strong ? '🔥 ' : '⚡ ') + msg);
     }
     if(prefs.autoTrade && signal.levels && !journal.some(e => e.paper && e.result === 'open' && e.sym === item.sym)){
-      /* Risk Engine: kill-switch blokuje AUTOMAT (dzienny limit / seria strat) */
-      const rs = riskStatus(journal);
+      /* Risk Engine v2 [A5]: floating + limit otwartych + dzienny limit UTC */
+      const live = liveRisk ? liveRisk(journal, { [item.sym]: data.price }) : undefined;
+      const rs = riskStatus(journal, {}, live);
       if(rs.blocked){
         Bus.show('🛑 Kill-switch: ' + rs.reason + ' — auto-trade wstrzymany');
       } else {
-        addJournal(makePaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'auto', signal.score, signal.entryQuality));
+        addJournal(makePaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'auto', signal.score, signal.entryQuality, signal));
         Bus.show('🤖 AUTO-TRADE: otwarto ' + dtxt + ' (paper) @ ' + fmtPrice(signal.levels.entry));
       }
     }
@@ -907,7 +919,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       Bus.show('Masz już otwartą pozycję paper na ' + item.sym);
                       return;
                     }
-                    addJournal(makePaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'signal', signal.score, signal.entryQuality));
+                    addJournal(makePaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'signal', signal.score, signal.entryQuality, signal));
                     Bus.show('▶ Otwarto pozycję paper @ ' + fmtPrice(signal.levels.entry) + ' — rozliczy się sama na SL/TP');
                     setShowSig(false);
                   }}>▶ Wykonaj sygnał (paper trade)</button>

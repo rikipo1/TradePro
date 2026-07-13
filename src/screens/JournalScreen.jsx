@@ -5,6 +5,7 @@ import { Bus } from '../core/bus.js';
 import { CAP_MAP, capEnabled, capitalTick } from '../data/capital.js';
 import { fetchQuotes } from '../data/feed.js';
 import { paperFloating } from '../data/paper.js';
+import { riskStatus } from '../signals/riskEngine.js';
 import { fmtPrice, pad2 } from '../utils/format.js';
 
 export function fmtDT(ts){
@@ -120,6 +121,24 @@ export function JournalScreen({ journal, setJournal }){
         </button>
         <button className="iconbtn accent" onClick={() => setShowAdd(true)}><Ic d={IC.plus} size={19} /></button>
       </div>
+
+      {(() => {
+        /* [A5] status Risk Engine v2: floating z żywych cen + limit otwartych */
+        const openPaper = journal.filter(e => e.paper && e.result === 'open');
+        const floatingR = +openPaper.reduce((a, e) => { const f = paperFloating(e, q[e.sym]); return a + (f != null ? f : 0); }, 0).toFixed(2);
+        const rs = riskStatus(journal, {}, { openCount: openPaper.length, floatingR });
+        if(!rs.blocked && rs.effDailyR >= 0 && !openPaper.length) return null;
+        return (
+          <div className="card" style={{marginTop:2, borderColor: rs.blocked ? 'rgba(255,107,94,.45)' : 'var(--border)'}}>
+            <div className="kv"><b>{rs.blocked ? '\u{1F6D1} Kill-switch aktywny' : 'Ryzyko dnia (UTC)'}</b>
+              <span className="mono" style={{color: rs.effDailyR < 0 ? 'var(--down)' : 'var(--dim)'}}>
+                {rs.effDailyR}R{rs.floatingR ? ' (floating ' + (rs.floatingR > 0 ? '+' : '') + rs.floatingR + 'R)' : ''} · otwarte {openPaper.length}
+              </span>
+            </div>
+            {rs.reason && <div style={{fontSize:11.5, color:'var(--down)', paddingTop:2}}>{rs.reason} — auto-trade wstrzymany</div>}
+          </div>
+        );
+      })()}
 
       <div className="card" style={{marginTop:2}}>
         <div className="kv"><b>Zamknięte transakcje</b><span className="mono">{closed.length}{openN ? ' · ' + openN + ' w trakcie' : ''}</span></div>
