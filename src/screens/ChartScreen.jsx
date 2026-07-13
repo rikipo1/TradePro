@@ -3,6 +3,7 @@ import { aiPrompt, buildAiContext, callClaude, callGemini, tolerantJson } from '
 import { backtestEngine, walkForwardKFold } from '../backtest/engine.js';
 import { ablationTable, ablationAscii } from '../backtest/ablation.js';
 import { nextModelStage, stageLabel } from '../core/governance.js';
+import { saveModelVersion, listModelVersions, activateModelVersion, getActiveVersion } from '../core/modelStore.js';
 import { riskStatus } from '../signals/riskEngine.js';
 import { Store } from '../core/store.js';
 import { ChartCanvas } from '../components/ChartCanvas.jsx';
@@ -406,6 +407,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       result:'open', r:0, paper:true, src:(srcTag || 'manual'), score:(score != null ? score : null),
       entryQuality: eq || null,
       riskPct, note,
+      modelV: (Store.get('rt_model_meta', null) || {}).modelV || null, // [E3-5]
       /* [A7] koszt + metadane pod monitoring (E3-1) i raport Shadow-vs-Backtest */
       spreadPx: sig && sig.levels ? sig.levels.spreadPx : null,
       prob: sig ? sig.prob : null,
@@ -1137,7 +1139,12 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                         totalNoos: wf.totalNoos,
                         oosPairsN: wf.oosPairsN, agg: wf.agg, payout: wf.payout,
                         regimeCoverage: wf.regimeCoverage, at: Date.now(),
+                        /* [E3-5] odcisk danych treningowych: pierwsza/ostatnia świeca + n */
+                        dataHash: candlesSafe.length ? (candlesSafe[0].t + '-' + candlesSafe[candlesSafe.length-1].t + '-' + candlesSafe.length) : null,
                       };
+                      /* [E3-5] każdy trening = nowa wersja (max 3, FIFO) */
+                      const knnPayload = wf.samples && wf.samples.length >= 40 ? wf.samples : null;
+                      meta.modelV = saveModelVersion(item.sym, tf.id, { weights: wf.weights, calib: wf.calib || null, meta, knn: knnPayload });
                       Store.set('rt_model_meta', meta);
                       setWv(v => v + 1);
                       Bus.show('🧠 k-fold OOS: ' + wf.totalNoos + ' tr · med avgR ' + (wf.agg.avgR.med != null ? wf.agg.avgR.med : '—') + 'R'
@@ -1179,6 +1186,33 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       : 'Wagi zapisane, ale NIEAKTYWNE (live liczy na domyślnych). Powód: ' + ((meta && meta.reliableWhy && meta.reliableWhy.length) ? meta.reliableWhy.join(' · ') : 'model niewiarygodny') + '.'}
                     <button className="mono" style={{marginLeft:8, color:'var(--down)', background:'none', border:'none', textDecoration:'underline'}}
                       onClick={() => { Store.set('rt_model_weights', null); Store.set('rt_model_calib', null); Store.set('rt_model_meta', null); setWv(v=>v+1); Bus.show('Przywrócono wagi domyślne'); }}>reset</button>
+                  </div>
+                );
+              })()}
+              {(() => {
+                /* [E3-5] wersje modelu dla sym×TF + przywracanie */
+                const vers = listModelVersions(item.sym, tf.id);
+                if(!vers.length) return null;
+                const act = getActiveVersion(item.sym, tf.id);
+                return (
+                  <div style={{marginTop:8, padding:'8px 10px', background:'var(--bg)', border:'1px solid var(--border)', borderRadius:10}}>
+                    <div style={{fontSize:11, color:'var(--dim2)', marginBottom:4}}>Wersje modelu · {item.sym} · {tf.label} (max 3, FIFO)</div>
+                    {vers.slice().reverse().map(({ v, meta }) => (
+                      <div key={v} className="kv" style={{fontSize:11.5}}>
+                        <b className="mono" style={{color: v === act ? 'var(--up)' : 'var(--dim)'}}>
+                          v{v}{v === act ? ' · aktywna' : ''}
+                        </b>
+                        <span className="mono" style={{color:'var(--dim2)'}}>
+                          {meta ? (new Date(meta.at).toLocaleDateString() + ' · n=' + meta.n + ' · OOS ' + (meta.totalNoos != null ? meta.totalNoos : '—')) : '—'}
+                          {v !== act && (
+                            <button className="mono" style={{marginLeft:8, color:'var(--cyan)', background:'none', border:'none', textDecoration:'underline'}}
+                              onClick={() => {
+                                if(activateModelVersion(item.sym, tf.id, v)){ setWv(x => x + 1); Bus.show('↩ Przywrócono model v' + v); }
+                              }}>przywróć</button>
+                          )}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 );
               })()}
