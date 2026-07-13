@@ -49,13 +49,16 @@ export function resolvePaperList(list, sym, px, notify){
     const slCur = e.slDyn != null ? e.slDyn : e.sl;
     const rOf = (p) => ((p - e.entry) / e.risk) * d;
     const stopHit = d === 1 ? px <= slCur : px >= slCur;
+    /* [A7] koszt transakcyjny w R: jawny costR albo spread/risk — bez tego
+       dziennik paper był systematycznie LEPSZY od pesymistycznego backtestu */
+    const costR = e.costR != null ? e.costR : (e.risk > 0 && e.spreadPx != null ? e.spreadPx / e.risk : 0);
 
     if(stopHit){
       changed = true;
       let res, r;
-      if(stage === 'open'){ res = 'sl'; r = -1; }
-      else if(stage === 'be'){ res = 'be'; r = +rOf(slCur).toFixed(2); }
-      else { res = 'tp1'; r = +((e.banked || 0) + 0.5 * rOf(slCur)).toFixed(2); }
+      if(stage === 'open'){ res = 'sl'; r = +(-1 - costR).toFixed(2); }
+      else if(stage === 'be'){ res = 'be'; r = +(rOf(slCur) - costR).toFixed(2); }
+      else { res = 'tp1'; r = +((e.banked || 0) + 0.5 * rOf(slCur) - costR).toFixed(2); }
       const done = { ...e, result:res, r, exit:slCur, exitTs:Date.now() };
       try{ done.coach = coachReview(done, list); }catch(err){}
       if(notify) notify(done);
@@ -80,7 +83,7 @@ export function resolvePaperList(list, sym, px, notify){
     if((ne.stage || stage) === 'runner'){
       if(e.tp2 != null && (d === 1 ? px >= e.tp2 : px <= e.tp2)){  // TP2 → koniec
         changed = true;
-        const r = +(((ne.banked != null ? ne.banked : e.banked) || 0) + 0.5 * rOf(e.tp2)).toFixed(2);
+        const r = +(((ne.banked != null ? ne.banked : e.banked) || 0) + 0.5 * rOf(e.tp2) - costR).toFixed(2);
         const done = { ...(mut ? ne : e), result:'tp2', r, exit:e.tp2, exitTs:Date.now() };
         try{ done.coach = coachReview(done, list); }catch(err){}
         if(notify) notify(done);

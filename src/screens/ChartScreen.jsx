@@ -397,6 +397,12 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       result:'open', r:0, paper:true, src:(srcTag || 'manual'), score:(score != null ? score : null),
       entryQuality: eq || null,
       riskPct, note,
+      /* [A7] koszt + metadane pod monitoring (E3-1) i raport Shadow-vs-Backtest */
+      spreadPx: sig && sig.levels ? sig.levels.spreadPx : null,
+      prob: sig ? sig.prob : null,
+      ev: sig ? sig.ev : null,
+      evModel: sig ? sig.evModel : null,
+      regime: sig && sig.regime ? sig.regime.type : null,
     };
   };
   /* zlecenie LIMIT w strefę okazji (paper): czeka aż cena DOJDZIE do wejścia,
