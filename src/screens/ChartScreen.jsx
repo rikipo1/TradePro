@@ -4,6 +4,9 @@ import { backtestEngine, walkForwardKFold } from '../backtest/engine.js';
 import { ablationTable, ablationAscii } from '../backtest/ablation.js';
 import { nextModelStage, stageLabel } from '../core/governance.js';
 import { saveModelVersion, listModelVersions, activateModelVersion, getActiveVersion } from '../core/modelStore.js';
+import { compareValidation, summarizeRun } from '../core/adaptive.js';
+import { logParamChange } from '../core/paramlog.js';
+import { DEFAULT_SMC } from '../constants/defaults.js';
 import { riskStatus } from '../signals/riskEngine.js';
 import { Store } from '../core/store.js';
 import { ChartCanvas } from '../components/ChartCanvas.jsx';
@@ -1206,6 +1209,37 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 }}>
                 🔬 Ablacja (dev) — wynik do konsoli
               </button>
+              {(() => {
+                /* [E4-3] Adaptive Learning Control: zmienione progi SMC muszą
+                   przejść k-fold vs ostatnio zwalidowane — inaczej rollback */
+                const validated = Store.get('rt_smc_validated', null) || DEFAULT_SMC;
+                const changed = JSON.stringify(validated) !== JSON.stringify(prefs.smc || DEFAULT_SMC);
+                if(!changed) return null;
+                return (
+                  <button className="chip mono"
+                    style={{width:'100%', justifyContent:'center', padding:'10px', fontSize:12.5, marginTop:8, color:'var(--ema9)', borderColor:'rgba(255,201,77,.45)', background:'rgba(255,201,77,.07)', opacity: bt.busy ? 0.6 : 1}}
+                    onClick={() => {
+                      if(bt.busy || !ind || candlesSafe.length < 250){ if(!bt.busy) Bus.show('Do walidacji trzeba ≥250 świec'); return; }
+                      setBt({ busy:true, res:null });
+                      setTimeout(() => {
+                        const oldRes = walkForwardKFold(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, validated, tf.id, { timeBudgetMs: 20000 });
+                        const newRes = walkForwardKFold(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, tf.id, { timeBudgetMs: 20000 });
+                        const cmp = compareValidation(oldRes, newRes);
+                        logParamChange('smc.walidacja', summarizeRun(oldRes), summarizeRun(newRes), { accept: cmp.accept, reasons: cmp.reasons });
+                        if(cmp.accept){
+                          Store.set('rt_smc_validated', { ...(prefs.smc || DEFAULT_SMC) });
+                          Bus.show('✓ Nowe progi zwalidowane OOS (' + summarizeRun(newRes) + ')' + (cmp.reasons.length ? ' · ' + cmp.reasons[0] : ''));
+                        } else {
+                          setPrefs(pp => ({ ...pp, smc: { ...validated } }));
+                          Bus.show('↩ ROLLBACK progów SMC: ' + cmp.reasons.join('; '));
+                        }
+                        setBt({ busy:false, res:null });
+                      }, 40);
+                    }}>
+                    ⚖ Zastosuj: zwaliduj zmienione progi SMC (k-fold, auto-rollback)
+                  </button>
+                );
+              })()}
               {Store.get('rt_model_weights', null) && (() => {
                 const meta = Store.get('rt_model_meta', null);
                 return (
