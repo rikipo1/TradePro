@@ -40,9 +40,18 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   const cfg = (srOverride && srOverride.__smc) || {
     premium:62, discount:38, dispImpulse:1.2, dispBody:0.6, fvgDist:0.5, strong:55, rangeBonus:15, minRR:1.5,
   };
+  /* [E2-1] flagi ablacyjne: truthy = element WYŁĄCZONY z toru decyzyjnego
+     (harness mierzy, czy element w ogóle zarabia) */
+  const ablate = (srOverride && srOverride.__ablate) || null;
+
   /* ---- SMC / struktura rynku (zero lookahead: piwoty tylko do i) ---- */
   const _piv = zigzag(candles.slice(0, i+1), ind.atr.slice(0, i+1));
-  const smc = smcAnalyze(candles, _piv, i, atr, cfg);
+  const smcRaw = smcAnalyze(candles, _piv, i, atr, cfg);
+  const smc = (ablate && ablate.smc)
+    ? { ms:null, bc:{ bos:0, choch:0, txt:'' }, pd:{ zone:null, pct:null },
+        fvg:{ nearest:null, nearDistAtr:null }, sweep:null, ob:null, disp:0,
+        eq:{ eqHigh:null, eqLow:null } }
+    : smcRaw;
   const relVol = hasVol ? relativeVolume(candles, i) : null;
 
   const reasons = [];
@@ -297,7 +306,7 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     stochK: k, stochD: d, stochKp: kp, stochDp: dp, vw, smc, nearSup, nearRes,
     relVol: relVol ? { ...relVol, dir: (c.c >= c.o ? 1 : -1) } : null,
     htfDir, liquidity: liq,
-  });
+  }, ablate);
   /* [A3] wagi/kalibracja TYLKO przy jawnym __reliable — bez tego skaner tła
      i wykres mogłyby liczyć na różnych modelach (alert ≠ sygnał na wykresie) */
   const modelOn = !!(srOverride && srOverride.__reliable && srOverride.__weights);
@@ -306,8 +315,10 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   let dir = factors.dirConsensus > 0.06 ? 1 : factors.dirConsensus < -0.06 ? -1 : 0;
 
   /* wymóg zgody min. 2 z 3 filarów (deconfounding kierunku) */
-  if(dir === 1 && bullPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — LONG odrzucony'); }
-  if(dir === -1 && bearPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — SHORT odrzucony'); }
+  if(!(ablate && ablate.pillarGate)){
+    if(dir === 1 && bullPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — LONG odrzucony'); }
+    if(dir === -1 && bearPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — SHORT odrzucony'); }
+  }
 
   /* P(win | dir) z modelu + kalibracja isotonic (jeśli wyuczona z ≥150 próbek) */
   const calibMap = modelOn ? (srOverride.__calib || null) : null;
@@ -325,7 +336,7 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   }
 
   /* blokada kontry HTF przy niskim P(win) */
-  if(dir !== 0 && htfDir !== 0 && dir !== htfDir && prob < 0.66){
+  if(!(ablate && ablate.htfGate) && dir !== 0 && htfDir !== 0 && dir !== htfDir && prob < 0.66){
     warns.push('Sygnał przeciw wyższemu interwałowi przy niskim P(win) — odrzucony');
     dir = 0;
   }
@@ -483,7 +494,7 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   const sessDt = isLive ? new Date() : new Date(c.t*1000);
   const sess = sessionInfo(sessDt);
   out.session = { label: sess.label, quality: sess.quality };
-  if(profG.sessionSensitive && out.dir !== 0){
+  if(profG.sessionSensitive && out.dir !== 0 && !(ablate && ablate.session)){
     if(sess.weekend){
       warns.push('Rynek zamknięty (' + sess.label + ') — wejście zablokowane');
       out.dir = 0; out.sessionBlock = true; delete out.levels;

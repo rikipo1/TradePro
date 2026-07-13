@@ -15,7 +15,7 @@
 
 const clamp1 = (x) => Math.max(-1, Math.min(1, x));
 
-export function extractFactors(x) {
+export function extractFactors(x, ablate) {
   const { price, atr, v20, v50, v200, rsi, macdM, macdS, macdH, macdHp,
     stochK, stochD, stochKp, stochDp, vw, smc, nearSup, nearRes, relVol,
     htfDir, liquidity } = x;
@@ -60,7 +60,8 @@ export function extractFactors(x) {
   if (nearSup && price - nearSup.hi >= 0 && price - nearSup.hi < a * 0.6) loc += 0.3;
   if (nearRes && nearRes.lo - price >= 0 && nearRes.lo - price < a * 0.6) loc -= 0.3;
   if (vw != null) loc += (price > vw ? 0.15 : -0.15);
-  const location = clamp1(loc);
+  /* [E2-1] ablacja: czynnik zerowany u źródła (nie w wagach) */
+  const location = (ablate && ablate.location) ? 0 : clamp1(loc);
 
   /* --- LIQUIDITY: sweep (kontra) + magnesy equal/PDH-PDL blisko --- */
   let liq = 0;
@@ -72,7 +73,7 @@ export function extractFactors(x) {
       if (d < 1.5) liq += (m.px > price ? 0.2 : -0.2) * (1 - d / 1.5) * (m.weight || 1);
     }
   }
-  const liquidityF = clamp1(liq);
+  const liquidityF = (ablate && ablate.liquidity) ? 0 : clamp1(liq);
 
   /* --- CONFIRMATION: BOS/CHOCH(displacement) + displacement + rel-vol --- */
   let conf = 0;

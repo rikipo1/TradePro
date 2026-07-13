@@ -98,6 +98,7 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
     if(weights){ zonesI.__weights = weights; zonesI.__reliable = true; }
     if(calib) zonesI.__calib = calib;
     if(opts && opts.knn) zonesI.__knn = opts.knn;
+    if(opts && opts.ablate) zonesI.__ablate = opts.ablate; // [E2-1] harness ablacyjny
     /* K2: HTF liczony PRZYCZYNOWO per świeca — dokładnie jak live. Bez tego
        trening widział htf=0 zawsze, a live htf≠0 (rozjazd cech train/serve). */
     if(tfId) zonesI.__htf = htfTrend(candles.slice(0, i + 1), tfId);
@@ -219,7 +220,8 @@ export function walkForwardKFold(candles, ind, emaData, hasVol, sym, minScore, s
   const n = candles.length;
   if(n < 250) return { ok:false, reason:'za mało danych (min 250 świec)' };
 
-  const base = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { tfId });
+  const ablate = opts.ablate || null; // [E2-1] konfiguracja ablacyjna dla całego przebiegu
+  const base = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { tfId, ablate });
   if(overBudget()) return { ok:false, reason:'przekroczono budżet czasu' };
 
   const testStart = Math.floor(n * 0.5);
@@ -235,7 +237,7 @@ export function walkForwardKFold(candles, ind, emaData, hasVol, sym, minScore, s
     const trainSamples = base.samples.filter(s => (s.i1 != null ? s.i1 : s.i0) < split);
     const tr = trainLogistic(trainSamples, { epochs: 400 });
     if(!tr.trained){ folds.push({ split, end, skipped:true, reason: tr.reason }); continue; }
-    const run = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, tfId });
+    const run = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, tfId, ablate });
     const oosTrades = run.trades.filter(t => t.i0 >= split && t.i0 < end);
     const oosPairs = oosTrades
       .filter(t => (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
@@ -258,7 +260,7 @@ export function walkForwardKFold(candles, ind, emaData, hasVol, sym, minScore, s
   const trProd = trainLogistic(base.samples, { epochs: 500 });
   if(!trProd.trained) return { ok:false, reason: trProd.reason, weights: trProd.weights };
   if(overBudget()) return { ok:false, reason:'przekroczono budżet czasu' };
-  const prodRun = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: trProd.weights, tfId });
+  const prodRun = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: trProd.weights, tfId, ablate });
   const prodInSample = statsOf(prodRun.trades); // WYŁĄCZNIE diagnostyka — nie do decyzji
 
   /* [A1] kalibracja produkcyjna TYLKO z pooled OOS (null gdy < 150 par) */

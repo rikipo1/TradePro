@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { aiPrompt, buildAiContext, callClaude, callGemini, tolerantJson } from '../ai/index.js';
 import { backtestEngine, walkForwardKFold } from '../backtest/engine.js';
+import { ablationTable, ablationAscii } from '../backtest/ablation.js';
 import { riskStatus } from '../signals/riskEngine.js';
 import { Store } from '../core/store.js';
 import { ChartCanvas } from '../components/ChartCanvas.jsx';
@@ -1128,6 +1129,22 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   }, 40);
                 }}>
                 🧠 Trenuj wagi z backtestu (walk-forward)
+              </button>
+              <button className="chip mono"
+                style={{width:'100%', justifyContent:'center', padding:'8px', fontSize:12, marginTop:8, color:'var(--dim)', borderColor:'var(--border2)', opacity: bt.busy ? 0.6 : 1}}
+                onClick={() => {
+                  if(bt.busy || !ind || candlesSafe.length < 250){ if(!bt.busy) Bus.show('Do ablacji trzeba ≥250 świec'); return; }
+                  setBt({ busy:true, res:null });
+                  setTimeout(() => {
+                    /* [E2-1] harness ablacyjny na bieżących świecach — wynik do konsoli */
+                    const rows = ablationTable(candlesSafe, item.sym, tf.id, { minScore: prefs.minScore, smcCfg: prefs.smc, timeBudgetMs: 60000 });
+                    console.log('[ABLACJA] ' + item.sym + ' · ' + tf.id + '\n' + ablationAscii(rows));
+                    const scored = rows.filter(r => r.medAvgR != null).sort((a, b) => b.medAvgR - a.medAvgR);
+                    Bus.show('🔬 Ablacja w konsoli · najlepsza konfiguracja: ' + (scored.length ? scored[0].konfiguracja + ' (' + scored[0].medAvgR + 'R)' : 'za mało transakcji OOS'));
+                    setBt({ busy:false, res:null });
+                  }, 40);
+                }}>
+                🔬 Ablacja (dev) — wynik do konsoli
               </button>
               {Store.get('rt_model_weights', null) && (() => {
                 const meta = Store.get('rt_model_meta', null);
