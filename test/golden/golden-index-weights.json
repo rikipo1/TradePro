@@ -1,0 +1,3467 @@
+{
+ "80": {
+  "i": 80,
+  "t": 1700024000,
+  "price": 119.08534390210406,
+  "score": 1,
+  "dir": 0,
+  "atr": 0.7008443433879262,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 2,
+   "bear": 0,
+   "struct": 1,
+   "mom": 0,
+   "ctx": 1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 14,
+    "txt": "Cena > EMA20 > EMA50 — układ wzrostowy"
+   },
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": -7,
+    "txt": "MACD pod linią sygnału"
+   },
+   {
+    "pts": -7,
+    "txt": "Stochastic — przecięcie w dół w wykupieniu"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 99, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "RSI 97 — wykupienie, ryzyko korekty"
+   },
+   {
+    "pts": -4,
+    "txt": "Histogram MACD pogłębia spadek"
+   },
+   {
+    "pts": -2,
+    "txt": "Formacje: ▼ Krzyż harami bessy 78%, ▲ Trzy zewnętrzne wzrostowe 67%"
+   }
+  ],
+  "warns": [
+   "Najbliższa struktura (dzienne high (draw on liquidity)) daje RR 0.35 < 1.6 — setup odrzucony (brak miejsca do celu)"
+  ],
+  "rrBlock": true,
+  "prob": 0.708,
+  "setupScore": 71,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 98.7,
+   "effRatio": 0.94,
+   "volPct": 0.25,
+   "volState": "normal",
+   "trendQuality": 0.98
+  },
+  "factors": {
+   "trend": 0.6,
+   "momentum": 0.07,
+   "location": 0.15,
+   "liquidity": 0.13,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 104.41564037465722,
+   "pdl": 99.5869459072128,
+   "todayHigh": 119.3711214002571,
+   "todayLow": 103.71413249109172
+  },
+  "vp": {
+   "poc": 104.12081945770211,
+   "val": 99.5869459072128,
+   "vah": 113.6007368814525
+  },
+  "session": {
+   "label": "sesja azjatycka (dla DE/US = szum)",
+   "quality": -1
+  },
+  "smc": {
+   "struktura": null,
+   "trend": 0,
+   "strefa": "? 50%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": 1,
+   "potwierdzenie": 0
+  },
+  "pullback": null,
+  "opportunities": []
+ },
+ "117": {
+  "i": 117,
+  "t": 1700035100,
+  "price": 127.75682489093163,
+  "score": 32,
+  "dir": 0,
+  "atr": 0.7808340940018249,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 3,
+   "bear": 0,
+   "struct": 1,
+   "mom": 1,
+   "ctx": 1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 14,
+    "txt": "Cena > EMA20 > EMA50 — układ wzrostowy"
+   },
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": 7,
+    "txt": "MACD nad linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 89, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "RSI 94 — wykupienie, ryzyko korekty"
+   },
+   {
+    "pts": 4,
+    "txt": "Histogram MACD rośnie"
+   }
+  ],
+  "warns": [
+   "Najbliższa struktura (dzienne high (draw on liquidity)) daje RR 0.04 < 1.6 — setup odrzucony (brak miejsca do celu)"
+  ],
+  "rrBlock": true,
+  "prob": 0.756,
+  "setupScore": 76,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 88.9,
+   "effRatio": 0.88,
+   "volPct": 0.65,
+   "volState": "normal",
+   "trendQuality": 0.95
+  },
+  "factors": {
+   "trend": 0.6,
+   "momentum": 0.85,
+   "location": 0.15,
+   "liquidity": 0.16,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 104.41564037465722,
+   "pdl": 99.5869459072128,
+   "todayHigh": 127.9039003494778,
+   "todayLow": 103.71413249109172
+  },
+  "vp": {
+   "poc": 123.77434449331415,
+   "val": 106.66618451777904,
+   "vah": 127.9039003494778
+  },
+  "session": {
+   "label": "przed otwarciem",
+   "quality": -1
+  },
+  "smc": {
+   "struktura": null,
+   "trend": 0,
+   "strefa": "? 50%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": 1,
+   "potwierdzenie": 1
+  },
+  "pullback": null,
+  "opportunities": []
+ },
+ "154": {
+  "i": 154,
+  "t": 1700046200,
+  "price": 137.40551409329058,
+  "score": 43,
+  "dir": 0,
+  "atr": 0.8047201235247213,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 3,
+   "bear": 0,
+   "struct": 1,
+   "mom": 1,
+   "ctx": 1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 14,
+    "txt": "Cena > EMA20 > EMA50 — układ wzrostowy"
+   },
+   {
+    "pts": 11,
+    "txt": "Formacje: ▲ Objęcie hossy 70%, ▲ Trzy zewnętrzne wzrostowe 67%, ▲ Trzej biali żołnierze 70%"
+   },
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": 7,
+    "txt": "MACD nad linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 87, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "RSI 93 — wykupienie, ryzyko korekty"
+   },
+   {
+    "pts": 4,
+    "txt": "Histogram MACD rośnie"
+   }
+  ],
+  "warns": [
+   "Najbliższa struktura (dzienne high (draw on liquidity)) daje RR 0.03 < 1.6 — setup odrzucony (brak miejsca do celu)"
+  ],
+  "rrBlock": true,
+  "prob": 0.756,
+  "setupScore": 76,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 86.7,
+   "effRatio": 0.85,
+   "volPct": 0.83,
+   "volState": "high",
+   "trendQuality": 0.94
+  },
+  "factors": {
+   "trend": 0.6,
+   "momentum": 0.85,
+   "location": 0.15,
+   "liquidity": 0.15,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 104.41564037465722,
+   "pdl": 99.5869459072128,
+   "todayHigh": 137.62065630656437,
+   "todayLow": 103.71413249109172
+  },
+  "vp": {
+   "poc": 124.23013417198382,
+   "val": 113.39018768208528,
+   "vah": 133.79479283954134
+  },
+  "session": {
+   "label": "sesja londyńska",
+   "quality": 1
+  },
+  "smc": {
+   "struktura": null,
+   "trend": 0,
+   "strefa": "? 50%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": "popytowy",
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": 1,
+   "potwierdzenie": 1
+  },
+  "pullback": null,
+  "opportunities": []
+ },
+ "191": {
+  "i": 191,
+  "t": 1700057300,
+  "price": 148.55932914853332,
+  "score": 32,
+  "dir": 0,
+  "atr": 0.8208418718661739,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 3,
+   "bear": 0,
+   "struct": 1,
+   "mom": 1,
+   "ctx": 1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 14,
+    "txt": "Cena > EMA20 > EMA50 — układ wzrostowy"
+   },
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": 7,
+    "txt": "MACD nad linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 92, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "RSI 99 — wykupienie, ryzyko korekty"
+   },
+   {
+    "pts": 4,
+    "txt": "Histogram MACD rośnie"
+   }
+  ],
+  "warns": [
+   "Najbliższa struktura (dzienne high (draw on liquidity)) daje RR 0.02 < 1.6 — setup odrzucony (brak miejsca do celu)"
+  ],
+  "rrBlock": true,
+  "prob": 0.753,
+  "setupScore": 75,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 91.7,
+   "effRatio": 1,
+   "volPct": 0.69,
+   "volState": "normal",
+   "trendQuality": 1
+  },
+  "factors": {
+   "trend": 0.6,
+   "momentum": 0.85,
+   "location": 0.15,
+   "liquidity": 0.12,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 104.41564037465722,
+   "pdl": 99.5869459072128,
+   "todayHigh": 148.98524872112324,
+   "todayLow": 103.71413249109172
+  },
+  "vp": {
+   "poc": 124.49801859645498,
+   "val": 121.18893344447278,
+   "vah": 142.36707841715884
+  },
+  "session": {
+   "label": "London×NY (overlap)",
+   "quality": 2
+  },
+  "smc": {
+   "struktura": null,
+   "trend": 0,
+   "strefa": "? 50%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": 1,
+   "potwierdzenie": 1
+  },
+  "pullback": null,
+  "opportunities": []
+ },
+ "228": {
+  "i": 228,
+  "t": 1700068400,
+  "price": 151.21223749838546,
+  "score": -14,
+  "dir": 0,
+  "atr": 0.8250650887099329,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 1,
+   "bear": 1,
+   "struct": 0,
+   "mom": -1,
+   "ctx": 1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": -8,
+    "txt": "EMA20 wyraźnie spada"
+   },
+   {
+    "pts": -8,
+    "txt": "RSI 37 — momentum pro-spadkowe"
+   },
+   {
+    "pts": -7,
+    "txt": "MACD pod linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": -6,
+    "txt": "ADX 54, −DI > +DI — aktywny trend spadkowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "Histogram MACD pogłębia spadek"
+   }
+  ],
+  "warns": [],
+  "prob": 0.5,
+  "setupScore": 50,
+  "regime": {
+   "type": "trend_weak",
+   "adx": 53.8,
+   "effRatio": 0.8,
+   "volPct": 0.69,
+   "volState": "normal",
+   "trendQuality": 0.92
+  },
+  "factors": {
+   "trend": 0,
+   "momentum": -0.48,
+   "location": 0.15,
+   "liquidity": 0,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 104.41564037465722,
+   "pdl": 99.5869459072128,
+   "todayHigh": 155.11318560639637,
+   "todayLow": 103.71413249109172
+  },
+  "vp": {
+   "poc": 151.91287054526555,
+   "val": 133.35104319070675,
+   "vah": 155.11318560639637
+  },
+  "session": {
+   "label": "sesja NY",
+   "quality": 1
+  },
+  "smc": {
+   "struktura": null,
+   "trend": 0,
+   "strefa": "? 50%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 0,
+   "lokalizacja": 1,
+   "potwierdzenie": -1
+  },
+  "pullback": null,
+  "opportunities": []
+ },
+ "265": {
+  "i": 265,
+  "t": 1700079500,
+  "price": 141.76234991451497,
+  "score": -16,
+  "dir": 0,
+  "atr": 0.707245993653812,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 1,
+   "bear": 2,
+   "struct": -1,
+   "mom": -1,
+   "ctx": 1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": -14,
+    "txt": "Cena < EMA20 < EMA50 — układ spadkowy"
+   },
+   {
+    "pts": -8,
+    "txt": "EMA20 wyraźnie spada"
+   },
+   {
+    "pts": -7,
+    "txt": "MACD pod linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": -6,
+    "txt": "ADX 77, −DI > +DI — aktywny trend spadkowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": 4,
+    "txt": "RSI 8 — wyprzedanie, możliwe odbicie"
+   },
+   {
+    "pts": -4,
+    "txt": "Histogram MACD pogłębia spadek"
+   }
+  ],
+  "warns": [
+   "Najbliższa struktura (VAL (profil wolumenu)) daje RR 0.23 < 1.6 — setup odrzucony (brak miejsca do celu)"
+  ],
+  "rrBlock": true,
+  "prob": 0.703,
+  "setupScore": 70,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 77.4,
+   "effRatio": 0.86,
+   "volPct": 0.02,
+   "volState": "low",
+   "trendQuality": 0.94
+  },
+  "factors": {
+   "trend": -0.6,
+   "momentum": -0.65,
+   "location": 0.15,
+   "liquidity": 0,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 104.41564037465722,
+   "pdl": 99.5869459072128,
+   "todayHigh": 155.11318560639637,
+   "todayLow": 103.71413249109172
+  },
+  "vp": {
+   "poc": 148.55875943323707,
+   "val": 140.2564862805686,
+   "vah": 152.49141513713266
+  },
+  "session": {
+   "label": "sesja NY",
+   "quality": 1
+  },
+  "smc": {
+   "struktura": null,
+   "trend": 0,
+   "strefa": "? 50%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": -1,
+   "lokalizacja": 1,
+   "potwierdzenie": -1
+  },
+  "pullback": null,
+  "opportunities": []
+ },
+ "302": {
+  "i": 302,
+  "t": 1700090600,
+  "price": 133.8134553915356,
+  "score": -24,
+  "dir": 0,
+  "atr": 0.7986670829576269,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 1,
+   "bear": 1,
+   "struct": -1,
+   "mom": 0,
+   "ctx": 1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": -14,
+    "txt": "Cena < EMA20 < EMA50 — układ spadkowy"
+   },
+   {
+    "pts": -8,
+    "txt": "EMA20 wyraźnie spada"
+   },
+   {
+    "pts": 7,
+    "txt": "MACD nad linią sygnału"
+   },
+   {
+    "pts": -6,
+    "txt": "Cena pod EMA200 — przewaga podaży długoterminowo"
+   },
+   {
+    "pts": -6,
+    "txt": "ADX 83, −DI > +DI — aktywny trend spadkowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": 4,
+    "txt": "RSI 8 — wyprzedanie, możliwe odbicie"
+   }
+  ],
+  "warns": [
+   "Za mało zgodnych filarów (struktura/momentum/lokalizacja) — SHORT odrzucony"
+  ],
+  "prob": 0.5,
+  "setupScore": 50,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 82.8,
+   "effRatio": 0.9,
+   "volPct": 0.51,
+   "volState": "normal",
+   "trendQuality": 0.96
+  },
+  "factors": {
+   "trend": -0.6,
+   "momentum": -0.35,
+   "location": 0.15,
+   "liquidity": 0,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 104.41564037465722,
+   "pdl": 99.5869459072128,
+   "todayHigh": 155.11318560639637,
+   "todayLow": 103.71413249109172
+  },
+  "vp": {
+   "poc": 148.41519753766414,
+   "val": 139.03801424143901,
+   "vah": 153.32705545473445
+  },
+  "session": {
+   "label": "po sesji (cienki rynek)",
+   "quality": -1
+  },
+  "smc": {
+   "struktura": null,
+   "trend": 0,
+   "strefa": "? 50%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": -1,
+   "lokalizacja": 1,
+   "potwierdzenie": 0
+  },
+  "pullback": null,
+  "opportunities": []
+ },
+ "339": {
+  "i": 339,
+  "t": 1700101700,
+  "price": 128.38416325434812,
+  "score": -12,
+  "dir": 0,
+  "atr": 0.9022558292044858,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 1,
+   "bear": 1,
+   "struct": 0,
+   "mom": 1,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 7,
+    "txt": "MACD nad linią sygnału"
+   },
+   {
+    "pts": -6,
+    "txt": "Cena pod EMA200 — przewaga podaży długoterminowo"
+   },
+   {
+    "pts": -6,
+    "txt": "ADX 65, −DI > +DI — aktywny trend spadkowy"
+   },
+   {
+    "pts": -5,
+    "txt": "Cena pod VWAP — kontrola podaży w sesji"
+   },
+   {
+    "pts": 4,
+    "txt": "Histogram MACD rośnie"
+   }
+  ],
+  "warns": [
+   "Struktura: kontrakcja (zwężenie) — brak czystego trendu, wymagaj mocniejszego setupu"
+  ],
+  "prob": 0.5,
+  "setupScore": 50,
+  "regime": {
+   "type": "range",
+   "adx": 64.8,
+   "effRatio": 0.18,
+   "volPct": 1,
+   "volState": "high",
+   "trendQuality": 0.67
+  },
+  "factors": {
+   "trend": 0,
+   "momentum": 0.3,
+   "location": -0.15,
+   "liquidity": 0,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 155.11318560639637,
+   "pdl": 103.71413249109172,
+   "todayHigh": 132.73996237247488,
+   "todayLow": 125.37517193093666
+  },
+  "vp": {
+   "poc": 148.98792782835014,
+   "val": 130.21881416630353,
+   "vah": 150.80429366661272
+  },
+  "session": {
+   "label": "sesja azjatycka (dla DE/US = szum)",
+   "quality": -1
+  },
+  "smc": {
+   "struktura": "kontrakcja (zwężenie)",
+   "trend": 0,
+   "strefa": "equilibrium 52%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 0,
+   "lokalizacja": -1,
+   "potwierdzenie": 1
+  },
+  "pullback": null,
+  "opportunities": []
+ },
+ "376": {
+  "i": 376,
+  "t": 1700112800,
+  "price": 140.27676685578194,
+  "score": 15,
+  "dir": 0,
+  "atr": 0.7673521230537468,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 2,
+   "bear": 1,
+   "struct": 1,
+   "mom": 1,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 14,
+    "txt": "Cena > EMA20 > EMA50 — układ wzrostowy"
+   },
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena tuż pod oporem (1 odbić)"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena w PREMIUM (73% zakresu) — dobra strefa do SHORT"
+   },
+   {
+    "pts": 7,
+    "txt": "MACD nad linią sygnału"
+   },
+   {
+    "pts": -7,
+    "txt": "Stochastic — przecięcie w dół w wykupieniu"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 72, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "RSI 94 — wykupienie, ryzyko korekty"
+   },
+   {
+    "pts": 4,
+    "txt": "Histogram MACD rośnie"
+   }
+  ],
+  "warns": [
+   "Struktura: kontrakcja (zwężenie) — brak czystego trendu, wymagaj mocniejszego setupu",
+   "Cena 4.0×ATR od EMA20 — wejście „w biegu\", rozważ cofnięcie",
+   "Najbliższa struktura (strefa oporu) daje RR -0.00 < 1.6 — setup odrzucony (brak miejsca do celu)"
+  ],
+  "rrBlock": true,
+  "prob": 0.653,
+  "setupScore": 65,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 71.9,
+   "effRatio": 1,
+   "volPct": 0.18,
+   "volState": "low",
+   "trendQuality": 1
+  },
+  "factors": {
+   "trend": 0.6,
+   "momentum": 0.4,
+   "location": -0.55,
+   "liquidity": 0.12,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 155.11318560639637,
+   "pdl": 103.71413249109172,
+   "todayHigh": 140.6532698503463,
+   "todayLow": 125.37517193093666
+  },
+  "vp": {
+   "poc": 140.0173790603988,
+   "val": 130.12399586481627,
+   "vah": 141.9960556995153
+  },
+  "session": {
+   "label": "sesja azjatycka (dla DE/US = szum)",
+   "quality": -1
+  },
+  "smc": {
+   "struktura": "kontrakcja (zwężenie)",
+   "trend": 0,
+   "strefa": "premium 73%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": -1,
+   "potwierdzenie": 1
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": true,
+   "reasons": [
+    "cena 4.0×ATR od EMA20 (rozciągnięcie)",
+    "RSI 94 — wykupienie",
+    "cena w PREMIUM (73%)"
+   ],
+   "trendLabel": "kontrakcja (zwężenie)",
+   "zone": {
+    "lo": 131.1653642087679,
+    "hi": 131.46170585438898
+   },
+   "entry": 131.30867171274855,
+   "factors": [
+    {
+     "label": "Fib 61,8%",
+     "px": 131.21140533615113
+    },
+    {
+     "label": "wsparcie",
+     "px": 131.41566472700575
+    }
+   ],
+   "confluence": 4.2,
+   "confidence": 44,
+   "grade": "C",
+   "invalidation": 125.18333390017322,
+   "target": 140.27761824040445,
+   "rr": 1.46,
+   "gapAtr": 11.49,
+   "distancePct": -6.39,
+   "state": "watch",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 131.30867171274855,
+    "zone": {
+     "lo": 131.1653642087679,
+     "hi": 131.46170585438898
+    },
+    "confidence": 44,
+    "grade": "C",
+    "state": "watch",
+    "note": "cena przewyciągnięta — cena 4.0×ATR od EMA20 (rozciągnięcie), RSI 94 — wykupienie",
+    "factors": [
+     "Fib 61,8%",
+     "wsparcie"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 140.27761824040445,
+    "rr": 1.46
+   }
+  ]
+ },
+ "413": {
+  "i": 413,
+  "t": 1700123900,
+  "price": 149.60543115057524,
+  "score": 2,
+  "dir": 0,
+  "atr": 0.7679205000794294,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 1,
+   "bear": 1,
+   "struct": 1,
+   "mom": 0,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 14,
+    "txt": "Cena > EMA20 > EMA50 — układ wzrostowy"
+   },
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena w PREMIUM (90% zakresu) — dobra strefa do SHORT"
+   },
+   {
+    "pts": -7,
+    "txt": "MACD pod linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 87, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": -6,
+    "txt": "Formacje: ▼ Krzyż harami bessy 78%"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "RSI 94 — wykupienie, ryzyko korekty"
+   },
+   {
+    "pts": -4,
+    "txt": "Histogram MACD pogłębia spadek"
+   }
+  ],
+  "warns": [
+   "Struktura: kontrakcja (zwężenie) — brak czystego trendu, wymagaj mocniejszego setupu",
+   "Za mało zgodnych filarów (struktura/momentum/lokalizacja) — LONG odrzucony"
+  ],
+  "prob": 0.5,
+  "setupScore": 50,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 87.2,
+   "effRatio": 0.87,
+   "volPct": 0.44,
+   "volState": "normal",
+   "trendQuality": 0.95
+  },
+  "factors": {
+   "trend": 0.6,
+   "momentum": 0.35,
+   "location": -0.25,
+   "liquidity": 0.09,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 155.11318560639637,
+   "pdl": 103.71413249109172,
+   "todayHigh": 150.15353890830892,
+   "todayLow": 125.37517193093666
+  },
+  "vp": {
+   "poc": 133.1184116113655,
+   "val": 125.37517193093666,
+   "vah": 141.89408324918483
+  },
+  "session": {
+   "label": "sesja londyńska",
+   "quality": 1
+  },
+  "smc": {
+   "struktura": "kontrakcja (zwężenie)",
+   "trend": 0,
+   "strefa": "premium 90%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": -1,
+   "potwierdzenie": 0
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": true,
+   "reasons": [
+    "cena 2.9×ATR od EMA20 (rozciągnięcie)",
+    "RSI 94 — wykupienie",
+    "cena w PREMIUM (90%)"
+   ],
+   "trendLabel": "kontrakcja (zwężenie)",
+   "zone": {
+    "lo": 134.7944328862881,
+    "hi": 134.8865833462976
+   },
+   "entry": 134.84050811629285,
+   "factors": [
+    {
+     "label": "Fib 61,8%",
+     "px": 134.84050811629285
+    }
+   ],
+   "confluence": 2.2,
+   "confidence": 38,
+   "grade": "D",
+   "invalidation": 125.1831918059168,
+   "target": 155.0459925626394,
+   "rr": 2.09,
+   "gapAtr": 19.17,
+   "distancePct": -9.87,
+   "state": "watch",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 134.84050811629285,
+    "zone": {
+     "lo": 134.7944328862881,
+     "hi": 134.8865833462976
+    },
+    "confidence": 38,
+    "grade": "D",
+    "state": "watch",
+    "note": "cena przewyciągnięta — cena 2.9×ATR od EMA20 (rozciągnięcie), RSI 94 — wykupienie",
+    "factors": [
+     "Fib 61,8%"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 155.0459925626394,
+    "rr": 2.09
+   }
+  ]
+ },
+ "450": {
+  "i": 450,
+  "t": 1700135000,
+  "price": 161.07352882530543,
+  "score": 40,
+  "dir": 0,
+  "atr": 0.8845323056277614,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 2,
+   "bear": 1,
+   "struct": 1,
+   "mom": 1,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 14,
+    "txt": "Cena > EMA20 > EMA50 — układ wzrostowy"
+   },
+   {
+    "pts": 14,
+    "txt": "Struktura: trend wzrostowy (HH+HL)"
+   },
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena w PREMIUM (99% zakresu) — dobra strefa do SHORT"
+   },
+   {
+    "pts": 7,
+    "txt": "MACD nad linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 93, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "RSI 98 — wykupienie, ryzyko korekty"
+   },
+   {
+    "pts": 4,
+    "txt": "Histogram MACD rośnie"
+   },
+   {
+    "pts": -4,
+    "txt": "Formacje: ▼ Krzyż harami bessy 78%, ▲ Trzy zewnętrzne wzrostowe 67%"
+   }
+  ],
+  "warns": [
+   "Najbliższa struktura (dzienne high (draw on liquidity)) daje RR 0.01 < 1.6 — setup odrzucony (brak miejsca do celu)"
+  ],
+  "rrBlock": true,
+  "prob": 0.783,
+  "setupScore": 78,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 93.2,
+   "effRatio": 0.99,
+   "volPct": 1,
+   "volState": "high",
+   "trendQuality": 0.99
+  },
+  "factors": {
+   "trend": 1,
+   "momentum": 0.85,
+   "location": -0.25,
+   "liquidity": 0.14,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 155.11318560639637,
+   "pdl": 103.71413249109172,
+   "todayHigh": 161.39156132529027,
+   "todayLow": 125.37517193093666
+  },
+  "vp": {
+   "poc": 142.63302518239777,
+   "val": 125.37517193093666,
+   "vah": 150.88678108527046
+  },
+  "session": {
+   "label": "sesja londyńska",
+   "quality": 1
+  },
+  "smc": {
+   "struktura": "trend wzrostowy (HH+HL)",
+   "trend": 1,
+   "strefa": "premium 99%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": -1,
+   "potwierdzenie": 1
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": true,
+   "reasons": [
+    "cena 3.6×ATR od EMA20 (rozciągnięcie)",
+    "RSI 98 — wykupienie",
+    "cena w PREMIUM (99%)"
+   ],
+   "trendLabel": "trend wzrostowy (HH+HL)",
+   "zone": {
+    "lo": 139.08036074124206,
+    "hi": 139.1865046179174
+   },
+   "entry": 139.13343267957973,
+   "factors": [
+    {
+     "label": "Fib 61,8%",
+     "px": 139.13343267957973
+    }
+   ],
+   "confluence": 2.2,
+   "confidence": 30,
+   "grade": "D",
+   "invalidation": 125.15403885452972,
+   "target": 161.39156132529027,
+   "rr": 1.59,
+   "gapAtr": 24.74,
+   "distancePct": -13.62,
+   "state": "watch",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 139.13343267957973,
+    "zone": {
+     "lo": 139.08036074124206,
+     "hi": 139.1865046179174
+    },
+    "confidence": 30,
+    "grade": "D",
+    "state": "watch",
+    "note": "cena przewyciągnięta — cena 3.6×ATR od EMA20 (rozciągnięcie), RSI 98 — wykupienie",
+    "factors": [
+     "Fib 61,8%"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 161.39156132529027,
+    "rr": 1.59
+   }
+  ]
+ },
+ "487": {
+  "i": 487,
+  "t": 1700146100,
+  "price": 168.89989379079782,
+  "score": 40,
+  "dir": 0,
+  "atr": 0.8250288592424003,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 2,
+   "bear": 1,
+   "struct": 1,
+   "mom": 1,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 14,
+    "txt": "Cena > EMA20 > EMA50 — układ wzrostowy"
+   },
+   {
+    "pts": 14,
+    "txt": "Struktura: trend wzrostowy (HH+HL)"
+   },
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena w PREMIUM (99% zakresu) — dobra strefa do SHORT"
+   },
+   {
+    "pts": 7,
+    "txt": "MACD nad linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 89, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "RSI 89 — wykupienie, ryzyko korekty"
+   }
+  ],
+  "warns": [
+   "Najbliższa struktura (dzienne high (draw on liquidity)) daje RR 0.01 < 1.6 — setup odrzucony (brak miejsca do celu)"
+  ],
+  "rrBlock": true,
+  "prob": 0.771,
+  "setupScore": 77,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 88.6,
+   "effRatio": 0.77,
+   "volPct": 0.78,
+   "volState": "normal",
+   "trendQuality": 0.91
+  },
+  "factors": {
+   "trend": 1,
+   "momentum": 0.65,
+   "location": -0.25,
+   "liquidity": 0.11,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 155.11318560639637,
+   "pdl": 103.71413249109172,
+   "todayHigh": 169.36481504904808,
+   "todayLow": 125.37517193093666
+  },
+  "vp": {
+   "poc": 166.0051384407707,
+   "val": 146.51901411276197,
+   "vah": 168.0209444057371
+  },
+  "session": {
+   "label": "London×NY (overlap)",
+   "quality": 2
+  },
+  "smc": {
+   "struktura": "trend wzrostowy (HH+HL)",
+   "trend": 1,
+   "strefa": "premium 99%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": -1,
+   "potwierdzenie": 1
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": true,
+   "reasons": [
+    "cena 2.7×ATR od EMA20 (rozciągnięcie)",
+    "RSI 89 — wykupienie",
+    "cena w PREMIUM (99%)"
+   ],
+   "trendLabel": "trend wzrostowy (HH+HL)",
+   "zone": {
+    "lo": 142.12971387050067,
+    "hi": 142.22871733360978
+   },
+   "entry": 142.17921560205522,
+   "factors": [
+    {
+     "label": "Fib 61,8%",
+     "px": 142.17921560205522
+    }
+   ],
+   "confluence": 2.2,
+   "confidence": 30,
+   "grade": "D",
+   "invalidation": 125.16891471612605,
+   "target": 169.36481504904808,
+   "rr": 1.6,
+   "gapAtr": 32.33,
+   "distancePct": -15.82,
+   "state": "watch",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 142.17921560205522,
+    "zone": {
+     "lo": 142.12971387050067,
+     "hi": 142.22871733360978
+    },
+    "confidence": 30,
+    "grade": "D",
+    "state": "watch",
+    "note": "cena przewyciągnięta — cena 2.7×ATR od EMA20 (rozciągnięcie), RSI 89 — wykupienie",
+    "factors": [
+     "Fib 61,8%"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 169.36481504904808,
+    "rr": 1.6
+   }
+  ]
+ },
+ "524": {
+  "i": 524,
+  "t": 1700157200,
+  "price": 175.53740189683162,
+  "score": 27,
+  "dir": 0,
+  "atr": 0.7273844871758961,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 1,
+   "bear": 1,
+   "struct": 1,
+   "mom": 0,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": -15,
+    "txt": "Formacje: ▼ Harami bessy 72%, ▼ Gwiazda wieczorna 78%, ▼ Trzy wewnętrzne spadkowe 76%"
+   },
+   {
+    "pts": 14,
+    "txt": "Cena > EMA20 > EMA50 — układ wzrostowy"
+   },
+   {
+    "pts": 14,
+    "txt": "Struktura: trend wzrostowy (HH+HL)"
+   },
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": 8,
+    "txt": "RSI 67 — momentum pro-wzrostowe"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena w PREMIUM (97% zakresu) — dobra strefa do SHORT"
+   },
+   {
+    "pts": -7,
+    "txt": "MACD pod linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 78, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "Histogram MACD pogłębia spadek"
+   }
+  ],
+  "warns": [
+   "Za mało zgodnych filarów (struktura/momentum/lokalizacja) — LONG odrzucony"
+  ],
+  "prob": 0.5,
+  "setupScore": 50,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 77.5,
+   "effRatio": 0.29,
+   "volPct": 0.17,
+   "volState": "low",
+   "trendQuality": 0.72
+  },
+  "factors": {
+   "trend": 1,
+   "momentum": 0.29,
+   "location": -0.25,
+   "liquidity": 0,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 155.11318560639637,
+   "pdl": 103.71413249109172,
+   "todayHigh": 176.9297918083845,
+   "todayLow": 125.37517193093666
+  },
+  "vp": {
+   "poc": 165.2881829781097,
+   "val": 153.64657414783485,
+   "vah": 175.7043592999345
+  },
+  "session": {
+   "label": "sesja NY",
+   "quality": 1
+  },
+  "smc": {
+   "struktura": "trend wzrostowy (HH+HL)",
+   "trend": 1,
+   "strefa": "premium 97%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": -1,
+   "potwierdzenie": 0
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": true,
+   "reasons": [
+    "cena w PREMIUM (97%)"
+   ],
+   "trendLabel": "trend wzrostowy (HH+HL)",
+   "zone": {
+    "lo": 174.97452292222982,
+    "hi": 175.0618090606909
+   },
+   "entry": 175.01816599146036,
+   "factors": [
+    {
+     "label": "EMA20",
+     "px": 175.01816599146036
+    }
+   ],
+   "confluence": 2,
+   "confidence": 37,
+   "grade": "D",
+   "invalidation": 174.79267680043586,
+   "target": 176.9297918083845,
+   "rr": 8.48,
+   "gapAtr": 0.65,
+   "distancePct": -0.3,
+   "state": "approaching",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 175.01816599146036,
+    "zone": {
+     "lo": 174.97452292222982,
+     "hi": 175.0618090606909
+    },
+    "confidence": 37,
+    "grade": "D",
+    "state": "approaching",
+    "note": "cena przewyciągnięta — cena w PREMIUM (97%)",
+    "factors": [
+     "EMA20"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 176.9297918083845,
+    "rr": 8.48
+   }
+  ]
+ },
+ "561": {
+  "i": 561,
+  "t": 1700168300,
+  "price": 165.01000941287492,
+  "score": -10,
+  "dir": 0,
+  "atr": 0.8486357735408306,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 1,
+   "bear": 2,
+   "struct": 1,
+   "mom": -1,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": -14,
+    "txt": "Cena < EMA20 < EMA50 — układ spadkowy"
+   },
+   {
+    "pts": 14,
+    "txt": "Struktura: trend wzrostowy (HH+HL)"
+   },
+   {
+    "pts": -8,
+    "txt": "EMA20 wyraźnie spada"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena w PREMIUM (77% zakresu) — dobra strefa do SHORT"
+   },
+   {
+    "pts": -7,
+    "txt": "MACD pod linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": -6,
+    "txt": "ADX 74, −DI > +DI — aktywny trend spadkowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": 4,
+    "txt": "RSI 6 — wyprzedanie, możliwe odbicie"
+   },
+   {
+    "pts": -4,
+    "txt": "Histogram MACD pogłębia spadek"
+   }
+  ],
+  "warns": [],
+  "prob": 0.5,
+  "setupScore": 50,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 73.9,
+   "effRatio": 0.89,
+   "volPct": 0.95,
+   "volState": "high",
+   "trendQuality": 0.95
+  },
+  "factors": {
+   "trend": 0.7,
+   "momentum": -0.65,
+   "location": -0.25,
+   "liquidity": 0,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 155.11318560639637,
+   "pdl": 103.71413249109172,
+   "todayHigh": 176.9297918083845,
+   "todayLow": 125.37517193093666
+  },
+  "vp": {
+   "poc": 166.0739914908169,
+   "val": 164.8677914555316,
+   "vah": 175.3215250946708
+  },
+  "session": {
+   "label": "sesja NY",
+   "quality": 1
+  },
+  "smc": {
+   "struktura": "trend wzrostowy (HH+HL)",
+   "trend": 1,
+   "strefa": "premium 77%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": -1,
+   "potwierdzenie": -1
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": true,
+   "reasons": [
+    "cena w PREMIUM (77%)"
+   ],
+   "trendLabel": "trend wzrostowy (HH+HL)",
+   "zone": {
+    "lo": 160.76094785989213,
+    "hi": 161.01129541308669
+   },
+   "entry": 160.96037726667424,
+   "factors": [
+    {
+     "label": "wsparcie",
+     "px": 160.96037726667424
+    }
+   ],
+   "confluence": 2,
+   "confidence": 37,
+   "grade": "D",
+   "invalidation": 160.5487889165069,
+   "target": 176.85553617819966,
+   "rr": 38.62,
+   "gapAtr": 4.71,
+   "distancePct": -2.45,
+   "state": "watch",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 160.96037726667424,
+    "zone": {
+     "lo": 160.76094785989213,
+     "hi": 161.01129541308669
+    },
+    "confidence": 37,
+    "grade": "D",
+    "state": "watch",
+    "note": "cena przewyciągnięta — cena w PREMIUM (77%)",
+    "factors": [
+     "wsparcie"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 176.85553617819966,
+    "rr": 38.62
+   }
+  ]
+ },
+ "598": {
+  "i": 598,
+  "t": 1700179400,
+  "price": 153.4654664079891,
+  "score": -23,
+  "dir": 0,
+  "atr": 0.7840214734860546,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 1,
+   "bear": 1,
+   "struct": 1,
+   "mom": 0,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": -14,
+    "txt": "Cena < EMA20 < EMA50 — układ spadkowy"
+   },
+   {
+    "pts": 14,
+    "txt": "Struktura: trend wzrostowy (HH+HL)"
+   },
+   {
+    "pts": -8,
+    "txt": "EMA20 wyraźnie spada"
+   },
+   {
+    "pts": 7,
+    "txt": "MACD nad linią sygnału"
+   },
+   {
+    "pts": -6,
+    "txt": "Cena pod EMA200 — przewaga podaży długoterminowo"
+   },
+   {
+    "pts": -6,
+    "txt": "ADX 92, −DI > +DI — aktywny trend spadkowy"
+   },
+   {
+    "pts": -5,
+    "txt": "Cena pod VWAP — kontrola podaży w sesji"
+   },
+   {
+    "pts": 4,
+    "txt": "RSI 3 — wyprzedanie, możliwe odbicie"
+   },
+   {
+    "pts": -3,
+    "txt": "Formacje: ▼ Trzy wewnętrzne spadkowe 66%"
+   }
+  ],
+  "warns": [
+   "Za mało zgodnych filarów (struktura/momentum/lokalizacja) — LONG odrzucony"
+  ],
+  "prob": 0.5,
+  "setupScore": 50,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 92.2,
+   "effRatio": 0.92,
+   "volPct": 0.5,
+   "volState": "normal",
+   "trendQuality": 0.97
+  },
+  "factors": {
+   "trend": 0.7,
+   "momentum": -0.35,
+   "location": -0.15,
+   "liquidity": 0.04,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 176.9297918083845,
+   "pdl": 125.37517193093666,
+   "todayHigh": 154.3492421156843,
+   "todayLow": 153.4064175882842
+  },
+  "vp": {
+   "poc": 173.49929973461985,
+   "val": 164.18796410583016,
+   "vah": 176.9297918083845
+  },
+  "session": {
+   "label": "sesja azjatycka (dla DE/US = szum)",
+   "quality": -1
+  },
+  "smc": {
+   "struktura": "trend wzrostowy (HH+HL)",
+   "trend": 1,
+   "strefa": "equilibrium 54%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": -1,
+   "potwierdzenie": 0
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": false,
+   "reasons": [],
+   "trendLabel": "trend wzrostowy (HH+HL)",
+   "zone": {
+    "lo": 147.963180826761,
+    "hi": 148.19446716143938
+   },
+   "entry": 148.14742587303022,
+   "factors": [
+    {
+     "label": "wsparcie",
+     "px": 148.14742587303022
+    }
+   ],
+   "confluence": 2,
+   "confidence": 47,
+   "grade": "C",
+   "invalidation": 147.7671754583895,
+   "target": 155.04458372746635,
+   "rr": 18.14,
+   "gapAtr": 6.72,
+   "distancePct": -3.47,
+   "state": "watch",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 148.14742587303022,
+    "zone": {
+     "lo": 147.963180826761,
+     "hi": 148.19446716143938
+    },
+    "confidence": 47,
+    "grade": "C",
+    "state": "watch",
+    "note": "cofnięcie do strefy konfluencji",
+    "factors": [
+     "wsparcie"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 155.04458372746635,
+    "rr": 18.14
+   }
+  ]
+ },
+ "635": {
+  "i": 635,
+  "t": 1700190500,
+  "price": 160.73447538844775,
+  "score": 21,
+  "dir": 0,
+  "atr": 0.815150893885435,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 2,
+   "bear": 1,
+   "struct": 1,
+   "mom": 1,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 14,
+    "txt": "Cena > EMA20 > EMA50 — układ wzrostowy"
+   },
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena tuż pod oporem (1 odbić)"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena w PREMIUM (69% zakresu) — dobra strefa do SHORT"
+   },
+   {
+    "pts": 7,
+    "txt": "MACD nad linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 60, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "RSI 85 — wykupienie, ryzyko korekty"
+   },
+   {
+    "pts": 3,
+    "txt": "Formacje: ▲ Trzy wewnętrzne wzrostowe 66%"
+   }
+  ],
+  "warns": [
+   "Struktura: kontrakcja (zwężenie) — brak czystego trendu, wymagaj mocniejszego setupu",
+   "Najbliższa struktura (strefa oporu) daje RR 0.01 < 1.6 — setup odrzucony (brak miejsca do celu)"
+  ],
+  "rrBlock": true,
+  "prob": 0.674,
+  "setupScore": 67,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 60.4,
+   "effRatio": 0.9,
+   "volPct": 0.61,
+   "volState": "normal",
+   "trendQuality": 0.96
+  },
+  "factors": {
+   "trend": 0.6,
+   "momentum": 0.65,
+   "location": -0.55,
+   "liquidity": 0.17,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 176.9297918083845,
+   "pdl": 125.37517193093666,
+   "todayHigh": 160.82687200861983,
+   "todayLow": 151.47571399359728
+  },
+  "vp": {
+   "poc": 153.06659385702147,
+   "val": 151.47571399359728,
+   "vah": 167.38451262783929
+  },
+  "session": {
+   "label": "sesja azjatycka (dla DE/US = szum)",
+   "quality": -1
+  },
+  "smc": {
+   "struktura": "kontrakcja (zwężenie)",
+   "trend": 0,
+   "strefa": "premium 69%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": -1,
+   "potwierdzenie": 1
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": true,
+   "reasons": [
+    "cena 2.7×ATR od EMA20 (rozciągnięcie)",
+    "RSI 85 — wykupienie",
+    "cena w PREMIUM (69%)"
+   ],
+   "trendLabel": "kontrakcja (zwężenie)",
+   "zone": {
+    "lo": 155.07117073355874,
+    "hi": 155.77462898839275
+   },
+   "entry": 155.6995197701266,
+   "factors": [
+    {
+     "label": "FVG",
+     "px": 155.6890397042734
+    },
+    {
+     "label": "VWAP",
+     "px": 155.7257199347596
+    }
+   ],
+   "confluence": 3.5,
+   "confidence": 39,
+   "grade": "D",
+   "invalidation": 151.27192627012593,
+   "target": 160.81479593327444,
+   "rr": 1.16,
+   "gapAtr": 6.08,
+   "distancePct": -3.13,
+   "state": "watch",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 155.6995197701266,
+    "zone": {
+     "lo": 155.07117073355874,
+     "hi": 155.77462898839275
+    },
+    "confidence": 39,
+    "grade": "D",
+    "state": "watch",
+    "note": "cena przewyciągnięta — cena 2.7×ATR od EMA20 (rozciągnięcie), RSI 85 — wykupienie",
+    "factors": [
+     "FVG",
+     "VWAP"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 160.81479593327444,
+    "rr": 1.16
+   }
+  ]
+ },
+ "672": {
+  "i": 672,
+  "t": 1700201600,
+  "price": 172.4058178709819,
+  "score": 22,
+  "dir": 0,
+  "atr": 0.8400811526926762,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 2,
+   "bear": 1,
+   "struct": 1,
+   "mom": 1,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 14,
+    "txt": "Cena > EMA20 > EMA50 — układ wzrostowy"
+   },
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena w PREMIUM (91% zakresu) — dobra strefa do SHORT"
+   },
+   {
+    "pts": 7,
+    "txt": "MACD nad linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 84, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "RSI 96 — wykupienie, ryzyko korekty"
+   },
+   {
+    "pts": -4,
+    "txt": "Formacje: ▼ Doji nagrobek 72%"
+   }
+  ],
+  "warns": [
+   "Struktura: kontrakcja (zwężenie) — brak czystego trendu, wymagaj mocniejszego setupu",
+   "Najbliższa struktura (dzienne high (draw on liquidity)) daje RR 0.02 < 1.6 — setup odrzucony (brak miejsca do celu)"
+  ],
+  "rrBlock": true,
+  "prob": 0.702,
+  "setupScore": 70,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 84,
+   "effRatio": 0.95,
+   "volPct": 0.81,
+   "volState": "high",
+   "trendQuality": 0.98
+  },
+  "factors": {
+   "trend": 0.6,
+   "momentum": 0.65,
+   "location": -0.25,
+   "liquidity": 0.12,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 176.9297918083845,
+   "pdl": 125.37517193093666,
+   "todayHigh": 172.83069379717335,
+   "todayLow": 151.47571399359728
+  },
+  "vp": {
+   "poc": 165.26747178340682,
+   "val": 155.9246681193423,
+   "vah": 169.27153049657733
+  },
+  "session": {
+   "label": "przed otwarciem",
+   "quality": -1
+  },
+  "smc": {
+   "struktura": "kontrakcja (zwężenie)",
+   "trend": 0,
+   "strefa": "premium 91%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": -1,
+   "potwierdzenie": 1
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": true,
+   "reasons": [
+    "cena 3.5×ATR od EMA20 (rozciągnięcie)",
+    "RSI 96 — wykupienie",
+    "cena w PREMIUM (91%)"
+   ],
+   "trendLabel": "kontrakcja (zwężenie)",
+   "zone": {
+    "lo": 160.76220966646724,
+    "hi": 161.08785348271962
+   },
+   "entry": 160.98556869608603,
+   "factors": [
+    {
+     "label": "wsparcie",
+     "px": 160.95962873735002
+    },
+    {
+     "label": "VWAP",
+     "px": 161.03744861355807
+    }
+   ],
+   "confluence": 3,
+   "confidence": 36,
+   "grade": "D",
+   "invalidation": 151.2656937054241,
+   "target": 176.85628470752388,
+   "rr": 1.63,
+   "gapAtr": 13.47,
+   "distancePct": -6.62,
+   "state": "watch",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 160.98556869608603,
+    "zone": {
+     "lo": 160.76220966646724,
+     "hi": 161.08785348271962
+    },
+    "confidence": 36,
+    "grade": "D",
+    "state": "watch",
+    "note": "cena przewyciągnięta — cena 3.5×ATR od EMA20 (rozciągnięcie), RSI 96 — wykupienie",
+    "factors": [
+     "wsparcie",
+     "VWAP"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 176.85628470752388,
+    "rr": 1.63
+   }
+  ]
+ },
+ "709": {
+  "i": 709,
+  "t": 1700212700,
+  "price": 176.49086379460056,
+  "score": -32,
+  "dir": 0,
+  "atr": 0.7729111458787062,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 1,
+   "bear": 2,
+   "struct": 1,
+   "mom": -1,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 14,
+    "txt": "Struktura: trend wzrostowy (HH+HL)"
+   },
+   {
+    "pts": -10,
+    "txt": "Świeże wybicie pod strefę wsparcia"
+   },
+   {
+    "pts": -8,
+    "txt": "RSI 43 — momentum pro-spadkowe"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena tuż pod oporem (1 odbić)"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena w PREMIUM (89% zakresu) — dobra strefa do SHORT"
+   },
+   {
+    "pts": -7,
+    "txt": "MACD pod linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": -6,
+    "txt": "ADX 60, −DI > +DI — aktywny trend spadkowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "Histogram MACD pogłębia spadek"
+   }
+  ],
+  "warns": [],
+  "prob": 0.5,
+  "setupScore": 50,
+  "regime": {
+   "type": "range",
+   "adx": 59.8,
+   "effRatio": 0.23,
+   "volPct": 0.3,
+   "volState": "normal",
+   "trendQuality": 0.69
+  },
+  "factors": {
+   "trend": 0.7,
+   "momentum": -0.33,
+   "location": -0.55,
+   "liquidity": 0.15,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 176.9297918083845,
+   "pdl": 125.37517193093666,
+   "todayHigh": 179.64665103774746,
+   "todayLow": 151.47571399359728
+  },
+  "vp": {
+   "poc": 153.23639755885668,
+   "val": 151.47571399359728,
+   "vah": 173.77770582021617
+  },
+  "session": {
+   "label": "sesja londyńska",
+   "quality": 1
+  },
+  "smc": {
+   "struktura": "trend wzrostowy (HH+HL)",
+   "trend": 1,
+   "strefa": "premium 89%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": -1,
+   "potwierdzenie": -1
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": true,
+   "reasons": [
+    "cena w PREMIUM (89%)"
+   ],
+   "trendLabel": "trend wzrostowy (HH+HL)",
+   "zone": {
+    "lo": 175.26774999893829,
+    "hi": 175.7356697201043
+   },
+   "entry": 175.6892950513516,
+   "factors": [
+    {
+     "label": "FVG",
+     "px": 175.6892950513516
+    }
+   ],
+   "confluence": 2.5,
+   "confidence": 32,
+   "grade": "D",
+   "invalidation": 175.07452221246862,
+   "target": 176.8621620831201,
+   "rr": 1.91,
+   "gapAtr": 0.98,
+   "distancePct": -0.45,
+   "state": "approaching",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 175.6892950513516,
+    "zone": {
+     "lo": 175.26774999893829,
+     "hi": 175.7356697201043
+    },
+    "confidence": 32,
+    "grade": "D",
+    "state": "approaching",
+    "note": "cena przewyciągnięta — cena w PREMIUM (89%)",
+    "factors": [
+     "FVG"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 176.8621620831201,
+    "rr": 1.91
+   }
+  ]
+ },
+ "746": {
+  "i": 746,
+  "t": 1700223800,
+  "price": 167.22440603186837,
+  "score": -32,
+  "dir": 0,
+  "atr": 0.9164511985671535,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 1,
+   "bear": 2,
+   "struct": 1,
+   "mom": -1,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": -14,
+    "txt": "Cena < EMA20 < EMA50 — układ spadkowy"
+   },
+   {
+    "pts": 14,
+    "txt": "Struktura: trend wzrostowy (HH+HL)"
+   },
+   {
+    "pts": -8,
+    "txt": "EMA20 wyraźnie spada"
+   },
+   {
+    "pts": -7,
+    "txt": "MACD pod linią sygnału"
+   },
+   {
+    "pts": -6,
+    "txt": "Cena pod EMA200 — przewaga podaży długoterminowo"
+   },
+   {
+    "pts": -6,
+    "txt": "ADX 72, −DI > +DI — aktywny trend spadkowy"
+   },
+   {
+    "pts": -5,
+    "txt": "Cena pod VWAP — kontrola podaży w sesji"
+   },
+   {
+    "pts": 4,
+    "txt": "RSI 5 — wyprzedanie, możliwe odbicie"
+   },
+   {
+    "pts": -4,
+    "txt": "Histogram MACD pogłębia spadek"
+   }
+  ],
+  "warns": [],
+  "prob": 0.5,
+  "setupScore": 50,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 71.7,
+   "effRatio": 1,
+   "volPct": 1,
+   "volState": "high",
+   "trendQuality": 1
+  },
+  "factors": {
+   "trend": 0.7,
+   "momentum": -0.65,
+   "location": -0.15,
+   "liquidity": 0,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 176.9297918083845,
+   "pdl": 125.37517193093666,
+   "todayHigh": 179.64665103774746,
+   "todayLow": 151.47571399359728
+  },
+  "vp": {
+   "poc": 175.63220709903248,
+   "val": 168.04936854812644,
+   "vah": 179.64665103774746
+  },
+  "session": {
+   "label": "lunch londyński (niska płynność)",
+   "quality": -1
+  },
+  "smc": {
+   "struktura": "trend wzrostowy (HH+HL)",
+   "trend": 1,
+   "strefa": "equilibrium 56%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": -1,
+   "potwierdzenie": -1
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": false,
+   "reasons": [],
+   "trendLabel": "trend wzrostowy (HH+HL)",
+   "zone": {
+    "lo": 160.75094508470073,
+    "hi": 161.02129818827808
+   },
+   "entry": 160.96631111636404,
+   "factors": [
+    {
+     "label": "wsparcie",
+     "px": 160.96631111636404
+    }
+   ],
+   "confluence": 2,
+   "confidence": 47,
+   "grade": "C",
+   "invalidation": 160.52183228505893,
+   "target": 176.84960232850986,
+   "rr": 35.73,
+   "gapAtr": 6.77,
+   "distancePct": -3.74,
+   "state": "watch",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 160.96631111636404,
+    "zone": {
+     "lo": 160.75094508470073,
+     "hi": 161.02129818827808
+    },
+    "confidence": 47,
+    "grade": "C",
+    "state": "watch",
+    "note": "cofnięcie do strefy konfluencji",
+    "factors": [
+     "wsparcie"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 176.84960232850986,
+    "rr": 35.73
+   }
+  ]
+ },
+ "783": {
+  "i": 783,
+  "t": 1700234900,
+  "price": 176.89275271224315,
+  "score": 30,
+  "dir": 0,
+  "atr": 0.9496491692896297,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 2,
+   "bear": 1,
+   "struct": 1,
+   "mom": 1,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 14,
+    "txt": "Cena > EMA20 > EMA50 — układ wzrostowy"
+   },
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena w PREMIUM (90% zakresu) — dobra strefa do SHORT"
+   },
+   {
+    "pts": 7,
+    "txt": "MACD nad linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 62, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "RSI 90 — wykupienie, ryzyko korekty"
+   },
+   {
+    "pts": 4,
+    "txt": "Histogram MACD rośnie"
+   }
+  ],
+  "warns": [
+   "Struktura: kontrakcja (zwężenie) — brak czystego trendu, wymagaj mocniejszego setupu",
+   "Najbliższa struktura (poprzedni swing high) daje RR 0.04 < 1.6 — setup odrzucony (brak miejsca do celu)"
+  ],
+  "rrBlock": true,
+  "prob": 0.705,
+  "setupScore": 70,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 61.6,
+   "effRatio": 0.97,
+   "volPct": 0.99,
+   "volState": "high",
+   "trendQuality": 0.99
+  },
+  "factors": {
+   "trend": 0.6,
+   "momentum": 0.85,
+   "location": -0.25,
+   "liquidity": 0,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 176.9297918083845,
+   "pdl": 125.37517193093666,
+   "todayHigh": 179.64665103774746,
+   "todayLow": 151.47571399359728
+  },
+  "vp": {
+   "poc": 175.3771656510296,
+   "val": 171.10768026431174,
+   "vah": 179.0773863195184
+  },
+  "session": {
+   "label": "London×NY (overlap)",
+   "quality": 2
+  },
+  "smc": {
+   "struktura": "kontrakcja (zwężenie)",
+   "trend": 0,
+   "strefa": "premium 90%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": -1,
+   "potwierdzenie": 1
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": true,
+   "reasons": [
+    "cena 3.2×ATR od EMA20 (rozciągnięcie)",
+    "RSI 90 — wykupienie",
+    "cena w PREMIUM (90%)"
+   ],
+   "trendLabel": "kontrakcja (zwężenie)",
+   "zone": {
+    "lo": 169.74163842529836,
+    "hi": 170.3711704828145
+   },
+   "entry": 170.27310635243717,
+   "factors": [
+    {
+     "label": "FVG",
+     "px": 170.23695139384355
+    },
+    {
+     "label": "Fib 61,8%",
+     "px": 170.31419153265713
+    }
+   ],
+   "confluence": 4.7,
+   "confidence": 47,
+   "grade": "C",
+   "invalidation": 165.74688550792789,
+   "target": 177.31909814686506,
+   "rr": 1.56,
+   "gapAtr": 6.87,
+   "distancePct": -3.74,
+   "state": "watch",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 170.27310635243717,
+    "zone": {
+     "lo": 169.74163842529836,
+     "hi": 170.3711704828145
+    },
+    "confidence": 47,
+    "grade": "C",
+    "state": "watch",
+    "note": "cena przewyciągnięta — cena 3.2×ATR od EMA20 (rozciągnięcie), RSI 90 — wykupienie",
+    "factors": [
+     "FVG",
+     "Fib 61,8%"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 177.31909814686506,
+    "rr": 1.56
+   }
+  ]
+ },
+ "820": {
+  "i": 820,
+  "t": 1700246000,
+  "price": 187.8002529478165,
+  "score": 9,
+  "dir": 0,
+  "atr": 0.8711692124862159,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 1,
+   "bear": 1,
+   "struct": 1,
+   "mom": 0,
+   "ctx": -1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 14,
+    "txt": "Cena > EMA20 > EMA50 — układ wzrostowy"
+   },
+   {
+    "pts": 14,
+    "txt": "Struktura: trend wzrostowy (HH+HL)"
+   },
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": -8,
+    "txt": "Cena w PREMIUM (99% zakresu) — dobra strefa do SHORT"
+   },
+   {
+    "pts": -7,
+    "txt": "MACD pod linią sygnału"
+   },
+   {
+    "pts": -7,
+    "txt": "Stochastic — przecięcie w dół w wykupieniu"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 94, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": -6,
+    "txt": "Formacje: ▼ Harami bessy 72%, ▲ Objęcie hossy 64%, ▼ Harami bessy 72%"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "RSI 90 — wykupienie, ryzyko korekty"
+   },
+   {
+    "pts": -4,
+    "txt": "Histogram MACD pogłębia spadek"
+   }
+  ],
+  "warns": [
+   "Za mało zgodnych filarów (struktura/momentum/lokalizacja) — LONG odrzucony"
+  ],
+  "prob": 0.5,
+  "setupScore": 50,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 94.2,
+   "effRatio": 0.73,
+   "volPct": 0.42,
+   "volState": "normal",
+   "trendQuality": 0.89
+  },
+  "factors": {
+   "trend": 1,
+   "momentum": 0.07,
+   "location": -0.25,
+   "liquidity": 0.13,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 176.9297918083845,
+   "pdl": 125.37517193093666,
+   "todayHigh": 188.17801204917473,
+   "todayLow": 151.47571399359728
+  },
+  "vp": {
+   "poc": 175.69404778415472,
+   "val": 166.90903589395546,
+   "vah": 179.85536920582805
+  },
+  "session": {
+   "label": "sesja NY",
+   "quality": 1
+  },
+  "smc": {
+   "struktura": "trend wzrostowy (HH+HL)",
+   "trend": 1,
+   "strefa": "premium 99%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": -1,
+   "potwierdzenie": 0
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": true,
+   "reasons": [
+    "cena 2.5×ATR od EMA20 (rozciągnięcie)",
+    "RSI 90 — wykupienie",
+    "cena w PREMIUM (99%)"
+   ],
+   "trendLabel": "trend wzrostowy (HH+HL)",
+   "zone": {
+    "lo": 179.51815357890575,
+    "hi": 179.77514849658917
+   },
+   "entry": 179.71476490786262,
+   "factors": [
+    {
+     "label": "wsparcie",
+     "px": 179.72287834384
+    },
+    {
+     "label": "Fib 38,2%",
+     "px": 179.7000132060856
+    }
+   ],
+   "confluence": 3.1,
+   "confidence": 26,
+   "grade": "D",
+   "invalidation": 165.76650549712875,
+   "target": 188.17801204917473,
+   "rr": 0.61,
+   "gapAtr": 9.21,
+   "distancePct": -4.31,
+   "state": "watch",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 179.71476490786262,
+    "zone": {
+     "lo": 179.51815357890575,
+     "hi": 179.77514849658917
+    },
+    "confidence": 26,
+    "grade": "D",
+    "state": "watch",
+    "note": "cena przewyciągnięta — cena 2.5×ATR od EMA20 (rozciągnięcie), RSI 90 — wykupienie",
+    "factors": [
+     "wsparcie",
+     "Fib 38,2%"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 188.17801204917473,
+    "rr": 0.61
+   }
+  ]
+ },
+ "857": {
+  "i": 857,
+  "t": 1700257100,
+  "price": 177.21191413913604,
+  "score": -2,
+  "dir": 1,
+  "atr": 0.8224522231716117,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 2,
+   "bear": 1,
+   "struct": 1,
+   "mom": -1,
+   "ctx": 1
+  },
+  "strong": true,
+  "reasons": [
+   {
+    "pts": -14,
+    "txt": "Cena < EMA20 < EMA50 — układ spadkowy"
+   },
+   {
+    "pts": 14,
+    "txt": "Struktura: trend wzrostowy (HH+HL)"
+   },
+   {
+    "pts": -8,
+    "txt": "EMA20 wyraźnie spada"
+   },
+   {
+    "pts": 8,
+    "txt": "Cena tuż nad wsparciem (1 odbić)"
+   },
+   {
+    "pts": -7,
+    "txt": "MACD pod linią sygnału"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": -6,
+    "txt": "ADX 62, −DI > +DI — aktywny trend spadkowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": 4,
+    "txt": "RSI 9 — wyprzedanie, możliwe odbicie"
+   },
+   {
+    "pts": -4,
+    "txt": "Histogram MACD pogłębia spadek"
+   }
+  ],
+  "warns": [
+   "Słabe okno płynności: po sesji (cienki rynek) — traktuj ostrożnie, cieńszy rynek"
+  ],
+  "levels": {
+   "entry": 177.21191413913604,
+   "sl": 176.6849761707066,
+   "tp1": 178.1131373964968,
+   "tp2": 188.285093678953,
+   "slDist": 0.5269379684294405,
+   "rr1": 1.66,
+   "rr2": 20.97,
+   "tp1why": "strefa oporu",
+   "spreadPx": 0.02481
+  },
+  "entryQuality": {
+   "dist": 1.1,
+   "anchor": "opór",
+   "grade": "akceptowalne",
+   "good": false,
+   "chase": false
+  },
+  "evModel": "empirical",
+  "ev": 0.451,
+  "sizing": {
+   "riskPct": 1,
+   "fullKellyPct": 49.8,
+   "edge": 0.8273184980214218,
+   "volMult": 1.15
+  },
+  "prob": 0.687,
+  "setupScore": 69,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 62.2,
+   "effRatio": 0.97,
+   "volPct": 0.09,
+   "volState": "low",
+   "trendQuality": 0.99
+  },
+  "factors": {
+   "trend": 0.7,
+   "momentum": -0.65,
+   "location": 0.45,
+   "liquidity": -0.19,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 176.9297918083845,
+   "pdl": 125.37517193093666,
+   "todayHigh": 188.285093678953,
+   "todayLow": 151.47571399359728
+  },
+  "vp": {
+   "poc": 179.45769531029984,
+   "val": 172.48869659820525,
+   "vah": 188.285093678953
+  },
+  "session": {
+   "label": "po sesji (cienki rynek)",
+   "quality": -1
+  },
+  "smc": {
+   "struktura": "trend wzrostowy (HH+HL)",
+   "trend": 1,
+   "strefa": "equilibrium 50%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 1,
+   "lokalizacja": 1,
+   "potwierdzenie": -1
+  },
+  "pullback": {
+   "active": true,
+   "dir": 1,
+   "overextended": false,
+   "reasons": [],
+   "trendLabel": "trend wzrostowy (HH+HL)",
+   "zone": {
+    "lo": 176.80848010546669,
+    "hi": 177.0511035113023
+   },
+   "entry": 177.00175637791202,
+   "factors": [
+    {
+     "label": "wsparcie",
+     "px": 177.00175637791202
+    }
+   ],
+   "confluence": 2,
+   "confidence": 47,
+   "grade": "C",
+   "invalidation": 176.6028670496738,
+   "target": 178.1131373964968,
+   "rr": 2.79,
+   "gapAtr": 0.2,
+   "distancePct": -0.12,
+   "state": "in_zone",
+   "confirm": [
+    "knot/świeca popytowa w strefie",
+    "RSI zawraca w górę",
+    "impuls (displacement) w górę",
+    "reakcja na OB/FVG"
+   ],
+   "live": false
+  },
+  "opportunities": [
+   {
+    "kind": "signal-now",
+    "dir": 1,
+    "title": "Wejście teraz",
+    "entry": 177.21191413913604,
+    "confidence": 53,
+    "grade": "C",
+    "state": "ready",
+    "note": "aktywny sygnał confluence -2",
+    "factors": [],
+    "confirm": []
+   },
+   {
+    "kind": "pullback",
+    "dir": 1,
+    "title": "Wejście po korekcie",
+    "entry": 177.00175637791202,
+    "zone": {
+     "lo": 176.80848010546669,
+     "hi": 177.0511035113023
+    },
+    "confidence": 47,
+    "grade": "C",
+    "state": "in_zone",
+    "note": "cofnięcie do strefy konfluencji",
+    "factors": [
+     "wsparcie"
+    ],
+    "confirm": [
+     "knot/świeca popytowa w strefie",
+     "RSI zawraca w górę",
+     "impuls (displacement) w górę",
+     "reakcja na OB/FVG"
+    ],
+    "target": 178.1131373964968,
+    "rr": 2.79
+   }
+  ]
+ },
+ "894": {
+  "i": 894,
+  "t": 1700268200,
+  "price": 177.9531469267908,
+  "score": 17,
+  "dir": 0,
+  "atr": 0.7785556711591094,
+  "rangeMode": false,
+  "htfDir": 0,
+  "pillars": {
+   "bull": 2,
+   "bear": 0,
+   "struct": 0,
+   "mom": 1,
+   "ctx": 1
+  },
+  "strong": false,
+  "reasons": [
+   {
+    "pts": 8,
+    "txt": "EMA20 wyraźnie rośnie"
+   },
+   {
+    "pts": 7,
+    "txt": "MACD nad linią sygnału"
+   },
+   {
+    "pts": -7,
+    "txt": "Formacje: ▼ Krzyż harami bessy 78%"
+   },
+   {
+    "pts": 6,
+    "txt": "Cena nad EMA200 — przewaga popytu długoterminowo"
+   },
+   {
+    "pts": 6,
+    "txt": "ADX 38, +DI > −DI — aktywny trend wzrostowy"
+   },
+   {
+    "pts": 5,
+    "txt": "Cena nad VWAP — kontrola popytu w sesji"
+   },
+   {
+    "pts": -4,
+    "txt": "RSI 76 — wykupienie, ryzyko korekty"
+   },
+   {
+    "pts": 4,
+    "txt": "Histogram MACD rośnie"
+   }
+  ],
+  "warns": [
+   "Struktura: kontrakcja (zwężenie) — brak czystego trendu, wymagaj mocniejszego setupu",
+   "Cena 1.7×ATR od VWAP — wejście „w biegu\", rozważ cofnięcie",
+   "Najbliższa struktura (dzienne high (draw on liquidity)) daje RR 0.05 < 1.6 — setup odrzucony (brak miejsca do celu)"
+  ],
+  "rrBlock": true,
+  "prob": 0.643,
+  "setupScore": 64,
+  "regime": {
+   "type": "trend_strong",
+   "adx": 37.8,
+   "effRatio": 0.94,
+   "volPct": 0.23,
+   "volState": "normal",
+   "trendQuality": 0.94
+  },
+  "factors": {
+   "trend": 0,
+   "momentum": 0.85,
+   "location": 0.15,
+   "liquidity": 0.14,
+   "confirmation": 0,
+   "htf": 0
+  },
+  "liquidityLevels": {
+   "pdh": 188.285093678953,
+   "pdl": 151.47571399359728,
+   "todayHigh": 178.18651810936848,
+   "todayLow": 175.10173282567396
+  },
+  "vp": {
+   "poc": 174.8001535631451,
+   "val": 173.85934378762363,
+   "vah": 183.26744154283844
+  },
+  "session": {
+   "label": "sesja azjatycka (dla DE/US = szum)",
+   "quality": -1
+  },
+  "smc": {
+   "struktura": "kontrakcja (zwężenie)",
+   "trend": 0,
+   "strefa": "equilibrium 54%",
+   "bos": 0,
+   "choch": 0,
+   "orderBlock": null,
+   "fvg": null,
+   "sweep": null,
+   "displacement": 0
+  },
+  "pillarsDetail": {
+   "struktura": 0,
+   "lokalizacja": 1,
+   "potwierdzenie": 1
+  },
+  "pullback": null,
+  "opportunities": []
+ }
+}
