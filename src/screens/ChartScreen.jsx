@@ -18,7 +18,7 @@ import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, mac
 import { detectPatterns } from '../patterns/index.js';
 import { computeSignal } from '../signals/engine.js';
 import { displacement } from '../smc/index.js';
-import { instrClass } from '../constants/instruments.js';
+import { portfolioCheck } from '../signals/portfolio.js';
 import { fmtClock, fmtFull, fmtPct, fmtPrice, fmtVol } from '../utils/format.js';
 import { notifyUser } from '../utils/notify.js';
 
@@ -391,15 +391,8 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   /* paper trading — pomocnicy */
   const makePaper = (dir, entry, sl, tp1, tp2, srcTag, score, eq, sig) => {
     const risk = Math.abs(entry - sl);
-    /* [A5] M4-proxy: otwarta pozycja INNEGO symbolu tej samej klasy w tym
-       samym kierunku ⇒ ryzyko ×0.5 (pełna macierz korelacji → Etap 4) */
-    let riskPct = sig && sig.sizing ? sig.sizing.riskPct : null;
-    let note;
-    if(riskPct != null){
-      const cls = instrClass(item.sym);
-      const dupCls = journal.some(e => e.paper && e.result === 'open' && e.sym !== item.sym && e.dir === dir && instrClass(e.sym) === cls);
-      if(dupCls){ riskPct = +(riskPct * 0.5).toFixed(2); note = 'ryzyko ×0.5 — skorelowana klasa (' + cls + ')'; }
-    }
+    const riskPct = sig && sig.sizing ? sig.sizing.riskPct : null;
+    const note = undefined; // wypełnia portfolioCheck w tryOpenPaper [E4-1]
     return {
       id: Date.now(), ts: Date.now(), sym:item.sym, name:item.name, tf:tf.id,
       dir, entry, sl, tp1, tp2, risk,
@@ -414,7 +407,32 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       ev: sig ? sig.ev : null,
       evModel: sig ? sig.evModel : null,
       regime: sig && sig.regime ? sig.regime.type : null,
+      session: sig && sig.session ? sig.session.label : null,      // [E4-4]
+      factors: sig && sig.factors ? { ...sig.factors } : null,     // [E4-4]
     };
+  };
+
+  /* [E4-1] każde otwarcie paper przechodzi przez Portfolio Risk Engine
+     (cap sumaryczny, korelacje, VaR-lite) — zastępuje klasowe proxy z [A5] */
+  const tryOpenPaper = (dir, entry, sl, tp1, tp2, srcTag, score, eq, sig) => {
+    const e = makePaper(dir, entry, sl, tp1, tp2, srcTag, score, eq, sig);
+    const open = journal
+      .filter(x => x.paper && x.result === 'open')
+      .map(x => ({ sym: x.sym, dir: x.dir, riskPct: x.riskPct != null ? x.riskPct : 0.5 }));
+    const volR = (sig && sig.atr && e.risk > 0) ? +(sig.atr / e.risk).toFixed(2) : null;
+    const pc = portfolioCheck(
+      { sym: item.sym, dir, riskPct: e.riskPct != null ? e.riskPct : 0.5, volR },
+      open, Store.get('rt_corr_matrix', null));
+    if(!pc.allowed){
+      Bus.show('🛑 Portfel: ' + pc.reason + ' — wejście odrzucone');
+      return false;
+    }
+    if(pc.scale < 1){
+      if(e.riskPct != null) e.riskPct = +(e.riskPct * pc.scale).toFixed(2);
+      e.note = ((e.note || '') + (e.note ? ' · ' : '') + pc.reason).trim();
+    }
+    addJournal(e);
+    return true;
   };
   /* zlecenie LIMIT w strefę okazji (paper): czeka aż cena DOJDZIE do wejścia,
      kasuje się przy unieważnieniu struktury albo po 12 h */
@@ -506,8 +524,9 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       if(rs.blocked){
         Bus.show('🛑 Kill-switch: ' + rs.reason + ' — auto-trade wstrzymany');
       } else {
-        addJournal(makePaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'auto', signal.score, signal.entryQuality, signal));
-        Bus.show('🤖 AUTO-TRADE: otwarto ' + dtxt + ' (paper) @ ' + fmtPrice(signal.levels.entry));
+        if(tryOpenPaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'auto', signal.score, signal.entryQuality, signal)){
+          Bus.show('🤖 AUTO-TRADE: otwarto ' + dtxt + ' (paper) @ ' + fmtPrice(signal.levels.entry));
+        }
       }
     }
   }, [signal, prefs.alert, prefs.autoTrade, prefs.onlyStrong, prefs.waitPullback, item.sym, tf.label]);
@@ -941,8 +960,9 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       Bus.show('Masz już otwartą pozycję paper na ' + item.sym);
                       return;
                     }
-                    addJournal(makePaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'signal', signal.score, signal.entryQuality, signal));
-                    Bus.show('▶ Otwarto pozycję paper @ ' + fmtPrice(signal.levels.entry) + ' — rozliczy się sama na SL/TP');
+                    if(tryOpenPaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'signal', signal.score, signal.entryQuality, signal)){
+                      Bus.show('▶ Otwarto pozycję paper @ ' + fmtPrice(signal.levels.entry) + ' — rozliczy się sama na SL/TP');
+                    }
                     setShowSig(false);
                   }}>▶ Wykonaj sygnał (paper trade)</button>
               )}
@@ -1082,8 +1102,9 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   Bus.show('SL i TP muszą być po właściwych stronach ceny');
                   return;
                 }
-                addJournal(makePaper(d, ticket.entry, sl, t1, isFinite(t2) ? t2 : null, 'manual', null));
-                Bus.show('▶ Pozycja paper otwarta @ ' + fmtPrice(ticket.entry));
+                if(tryOpenPaper(d, ticket.entry, sl, t1, isFinite(t2) ? t2 : null, 'manual', null)){
+                  Bus.show('▶ Pozycja paper otwarta @ ' + fmtPrice(ticket.entry));
+                }
                 setTicket(null);
               }}>Otwórz pozycję (paper)</button>
           </div>

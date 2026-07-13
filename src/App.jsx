@@ -203,6 +203,10 @@ export function App(){
           }catch(e){ continue; }
           if(res && res.data && res.data.candles && res.data.candles.length > 30){
             bgClosesRef.current[it.sym] = res.data.candles.slice(-200).map(cc => cc.c);
+            /* [E4-1] utrwalaj macierz korelacji — portfolioCheck czyta ją przy otwarciach */
+            if(Object.keys(bgClosesRef.current).length >= 2){
+              try{ Store.set('rt_corr_matrix', correlationMatrix(bgClosesRef.current)); }catch(e){}
+            }
           }
           const sig = res && res.signal;
           if(!sig) continue;
