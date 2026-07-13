@@ -86,6 +86,17 @@ export function expectedValueR(prob, rr, costR) {
   return prob * rr - (1 - prob) * 1 - (costR || 0);
 }
 
+/* [A4] EV z EMPIRYCZNEJ dystrybucji wypłat (payout z pooled OOS k-fold).
+   Formuła liniowa zakłada wypłatę pełnego rr1 i zero BE/TIMEOUT — realny
+   schemat (partial 50% na TP1 + runner + spory udział BE) daje inne liczby.
+   payout: { eWin, pBE, eBE, pTO, eTO } — patrz computePayout(). */
+export function expectedValueEmpirical(prob, payout, costR) {
+  if (!payout || payout.eWin == null) return null;
+  const pDecisive = Math.max(0, 1 - (payout.pBE || 0) - (payout.pTO || 0));
+  return prob * pDecisive * payout.eWin + (1 - prob) * pDecisive * (-1)
+       + (payout.pBE || 0) * (payout.eBE || 0) + (payout.pTO || 0) * (payout.eTO || 0) - (costR || 0);
+}
+
 /* ---------------- KALIBRACJA (K4) ----------------
    Surowa sigmoida nie jest prawdopodobieństwem skalibrowanym. Isotonic
    regression (algorytm PAV) uczy monotoniczną mapę p_surowe → p_realne

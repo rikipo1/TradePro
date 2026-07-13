@@ -8,7 +8,7 @@ import { buildPullbackPlan } from './pullback.js';
 import { buildOpportunities } from './opportunities.js';
 import { classifyRegime } from './regime.js';
 import { extractFactors, orientedVector } from './features.js';
-import { predictProb, expectedValueR, applyIsotonic } from './model.js';
+import { predictProb, expectedValueR, expectedValueEmpirical, applyIsotonic } from './model.js';
 import { similarOutcomes } from './similarity.js';
 import { liquidityModel, drawOnLiquidity } from './liquidity.js';
 import { volumeProfile } from './volumeProfile.js';
@@ -435,7 +435,12 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   /* --- EV GATE + prob + sizing (Engine v2): akceptacja z prawdopodobieństwa, nie z sumy punktów --- */
   if(out.dir !== 0 && out.levels){
     const costR = out.levels.slDist > 0 ? (out.levels.spreadPx / out.levels.slDist) : 0;
-    const ev = expectedValueR(prob, out.levels.rr1 || 1.5, costR);
+    /* [A4] EV z empirycznej dystrybucji wypłat (payout z pooled OOS), gdy
+       dostępna; formuła liniowa p·rr−(1−p)−koszt tylko jako fallback */
+    const payoutEmp = (srOverride && srOverride.__payout) || null;
+    const evEmp = payoutEmp ? expectedValueEmpirical(prob, payoutEmp, costR) : null;
+    const ev = evEmp != null ? evEmp : expectedValueR(prob, out.levels.rr1 || 1.5, costR);
+    out.evModel = evEmp != null ? 'empirical' : 'linear';
     const minProb = (srOverride && srOverride.__minProb != null) ? srOverride.__minProb : 0.52;
     out.ev = +ev.toFixed(3);
     if(prob < minProb || ev <= 0){
