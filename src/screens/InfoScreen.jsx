@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { DEFAULT_SMC } from '../constants/defaults.js';
+import { logParamChange } from '../core/paramlog.js';
 import { Bus } from '../core/bus.js';
 import { Net } from '../core/net.js';
 import { Store } from '../core/store.js';
@@ -133,13 +134,21 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
               Bus.show('↺ Progi SMC przywrócone do wartości domyślnych');
             }}>↺ Reset do domyślnych</button>
         </div>
-        <div style={{fontSize:12, color:'var(--dim)', lineHeight:1.6, marginBottom:10}}>
+        <div style={{fontSize:12, color:'var(--dim)', lineHeight:1.6, marginBottom:6}}>
           Domyślne wartości są rozsądnym startem — dostrój je własnym backtestem na realnych
           danych DAX/US100. Zmiany działają natychmiast na wykresie, w skanerze i w backteście.
         </div>
+        <div style={{fontSize:11.5, color:'var(--ema9)', lineHeight:1.55, marginBottom:10, padding:'7px 10px', border:'1px solid rgba(255,201,77,.35)', borderRadius:9, background:'rgba(255,201,77,.07)'}}>
+          ⚠ zmiana niezwalidowana — po zmianie przetrenuj i sprawdź OOS. Każda zmiana
+          progu toru decyzyjnego jest logowana (rt_paramlog) pod kontrolę adaptacji.
+        </div>
         {(() => {
           const smc = prefs.smc || DEFAULT_SMC;
-          const setSmc = (k, v) => setPrefs(p => ({ ...p, smc:{ ...DEFAULT_SMC, ...(p.smc||{}), [k]:v } }));
+          const setSmc = (k, v) => {
+            /* [E2-5] log zmian parametrów toru decyzyjnego (fundament E4-3) */
+            logParamChange('smc.' + k, (prefs.smc || DEFAULT_SMC)[k], v);
+            setPrefs(p => ({ ...p, smc:{ ...DEFAULT_SMC, ...(p.smc||{}), [k]:v } }));
+          };
           const rows = [
             ['premium', 'Próg PREMIUM (short powyżej %)', 55, 80, 1, '%', 'Powyżej tego % zakresu cena jest „droga" — preferowane shorty'],
             ['discount', 'Próg DISCOUNT (long poniżej %)', 20, 45, 1, '%', 'Poniżej tego % cena jest „tania" — preferowane longi'],
