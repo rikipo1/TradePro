@@ -716,9 +716,11 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
         const active = sr.dir !== 0 && sr.levels;
         const top = sr.ranking && sr.ranking[0];
         const dcol = sr.dir > 0 ? '#2fd6ae' : sr.dir < 0 ? '#ff6b5e' : '#8fb0ac';
+        const canOpen = active && !journal.some(e => e.paper && (e.result === 'open' || e.result === 'pending') && e.sym === item.sym);
         return (
-          <button className="sigstrip" onClick={() => setShowStrat(true)}
+          <div className="sigstrip" onClick={() => setShowStrat(true)}
             style={{
+              cursor: 'pointer',
               borderColor: active ? (sr.dir > 0 ? 'rgba(47,214,174,.45)' : 'rgba(255,107,94,.45)') : 'rgba(199,146,255,.35)',
               background: active ? (sr.dir > 0 ? 'rgba(47,214,174,.07)' : 'rgba(255,107,94,.07)') : 'rgba(199,146,255,.05)',
             }}>
@@ -737,13 +739,30 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 ? 'E ' + fmtPrice(sr.levels.entry) + ' · SL ' + fmtPrice(sr.levels.sl) + ' · TP1 ' + fmtPrice(sr.levels.tp1)
                 : (top && top.levels ? '(war.) E ' + fmtPrice(top.levels.entry) + ' · SL ' + fmtPrice(top.levels.sl) + ' · TP1 ' + fmtPrice(top.levels.tp1) : 'ranking strategii — tapnij')}
             </span>
-            {sr.mtf && sr.mtf.frames.length > 0 && (
+            {sr.mtf && sr.mtf.frames.length > 0 && !canOpen && (
               <span className="mono" style={{fontSize:10, fontWeight:800, padding:'2px 6px', borderRadius:6, whiteSpace:'nowrap',
                 color:'#c792ff', background:'rgba(199,146,255,.12)', border:'1px solid rgba(199,146,255,.3)'}}>
                 MTF {sr.mtf.align > 0.15 ? '▲' : sr.mtf.align < -0.15 ? '▼' : '•'}
               </span>
             )}
-          </button>
+            {canOpen && (
+              /* setup GOTOWY → wejście jednym tapnięciem wprost z paska
+                 (przez portfolioCheck/risk jak każde otwarcie; zasila uczenie) */
+              <button className="chip mono" onClick={(ev) => {
+                  ev.stopPropagation();
+                  const L = sr.levels;
+                  if(tryOpenPaper(sr.dir, L.entry, L.sl, L.tp1, L.tp2, 'strategy:' + sr.best.id, sr.confidence, null, signal, { strategy: sr.best.id })){
+                    Bus.show('▶ ' + (sr.dir > 0 ? 'KUP' : 'SPRZEDAJ') + ' (paper): ' + sr.best.name + ' @ ' + fmtPrice(L.entry));
+                  }
+                }}
+                style={{padding:'8px 12px', fontSize:12.5, fontWeight:900, whiteSpace:'nowrap', flexShrink:0,
+                  color: sr.dir > 0 ? '#051b21' : '#fff',
+                  background: sr.dir > 0 ? '#2fd6ae' : '#ff6b5e',
+                  border: 'none', borderRadius: 9}}>
+                ▶ {sr.dir > 0 ? 'KUP' : 'SPRZEDAJ'}
+              </button>
+            )}
+          </div>
         );
       })()}
 
