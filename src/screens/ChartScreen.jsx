@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { aiPrompt, buildAiContext, callClaude, callGemini, tolerantJson } from '../ai/index.js';
 import { backtestEngine, walkForwardKFold } from '../backtest/engine.js';
 import { ablationTable, ablationAscii } from '../backtest/ablation.js';
+import { nextModelStage, stageLabel } from '../core/governance.js';
 import { riskStatus } from '../signals/riskEngine.js';
 import { Store } from '../core/store.js';
 import { ChartCanvas } from '../components/ChartCanvas.jsx';
@@ -34,6 +35,12 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const [ticket, setTicket] = useState(null);
   const [bt, setBt] = useState({ busy:false, res:null });
   const [wv, setWv] = useState(0); // wersja wag modelu (bump po treningu → recompute)
+  const [trainCool, setTrainCool] = useState(0); // [E2-4] cooldown przycisku treningu (s)
+  useEffect(() => {
+    if(trainCool <= 0) return;
+    const h = setInterval(() => setTrainCool(c => (c > 0 ? c - 1 : 0)), 1000);
+    return () => clearInterval(h);
+  }, [trainCool > 0]);
   const prevDirRef = useRef(0);
   const lastAlertRef = useRef({ dir:0, t:0, bar:null });
   const pbAlertRef = useRef({ key:null, t:0 });
@@ -1103,23 +1110,32 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 style={{width:'100%', justifyContent:'center', padding:'10px', fontSize:13, marginTop:8, color:'var(--cyan)', borderColor:'rgba(79,216,255,.4)', opacity: bt.busy ? 0.6 : 1}}
                 onClick={() => {
                   if(bt.busy || !ind || candlesSafe.length < 250){ if(!bt.busy) Bus.show('Do treningu wag trzeba ≥250 świec (zmień interwał na większy zakres)'); return; }
+                  if(trainCool > 0){ Bus.show('⏳ Cooldown treningu: odczekaj ' + trainCool + ' s'); return; } // [E2-4]
+                  setTrainCool(60);
                   setBt({ busy:true, res:null });
                   setTimeout(() => {
-                    const wf = walkForwardKFold(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, tf.id);
+                    const wf = walkForwardKFold(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, tf.id, { timeBudgetMs: 20000 });
                     if(wf && wf.ok){
+                      /* [E2-3] pełna aktywacja dopiero po 2 treningach reliable ≥24 h */
+                      const prevMeta = Store.get('rt_model_meta', null);
+                      const st = nextModelStage(prevMeta, !!wf.reliable, Date.now());
                       Store.set('rt_model_weights', wf.weights);
                       Store.set('rt_model_calib', wf.calib || null); // [A1] kalibracja WYŁĄCZNIE z pooled OOS
                       Store.set('rt_knn_history', wf.samples && wf.samples.length >= 40 ? wf.samples : null);
-                      Store.set('rt_model_meta', {
-                        n: wf.training.n, reliable: !!wf.reliable, reliableWhy: wf.reliableWhy || [],
+                      const meta = {
+                        n: wf.training.n,
+                        reliable: st.stage === 'active', // konsumenci __reliable bez zmian
+                        kfReliable: !!wf.reliable, reliableWhy: wf.reliableWhy || [],
+                        stage: st.stage, reliableStreak: st.streak, candidateAt: st.candidateAt,
                         totalNoos: wf.totalNoos,
                         oosPairsN: wf.oosPairsN, agg: wf.agg, payout: wf.payout,
                         regimeCoverage: wf.regimeCoverage, at: Date.now(),
-                      });
+                      };
+                      Store.set('rt_model_meta', meta);
                       setWv(v => v + 1);
                       Bus.show('🧠 k-fold OOS: ' + wf.totalNoos + ' tr · med avgR ' + (wf.agg.avgR.med != null ? wf.agg.avgR.med : '—') + 'R'
                         + (wf.agg.brier.p75 != null ? ' · Brier p75 ' + wf.agg.brier.p75 : '')
-                        + (wf.reliable ? '' : ' · ⚠ NIEWIARYGODNE — model nie będzie używany live'));
+                        + ' · ' + stageLabel(meta));
                     } else {
                       Bus.show('Trening nieudany: ' + (wf ? wf.reason : 'brak danych'));
                     }
@@ -1129,7 +1145,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                     setBt({ busy:false, res:r });
                   }, 40);
                 }}>
-                🧠 Trenuj wagi z backtestu (walk-forward)
+                🧠 Trenuj wagi z backtestu (walk-forward){trainCool > 0 ? ' · ' + trainCool + ' s' : ''}
               </button>
               <button className="chip mono"
                 style={{width:'100%', justifyContent:'center', padding:'8px', fontSize:12, marginTop:8, color:'var(--dim)', borderColor:'var(--border2)', opacity: bt.busy ? 0.6 : 1}}
