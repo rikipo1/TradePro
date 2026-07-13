@@ -3,7 +3,7 @@ import { getChart, htfTrend } from '../data/feed.js';
 import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
 import { detectPatterns, zigzag } from '../patterns/index.js';
 import { displacement, relativeVolume, smcAnalyze } from '../smc/index.js';
-import { sessionInfo } from '../utils/sessions.js';
+import { sessionInfo, macroWindow } from '../utils/sessions.js';
 import { buildPullbackPlan } from './pullback.js';
 import { buildOpportunities } from './opportunities.js';
 import { classifyRegime } from './regime.js';
@@ -463,23 +463,14 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   out.liquidityLevels = { pdh: liq.pdh, pdl: liq.pdl, todayHigh: liq.todayHigh, todayLow: liq.todayLow };
   if(vp) out.vp = vp;
 
-  /* okna makro / otwarcia sesji (czas lokalny) — INFORMACYJNIE (bez blokady wejść) */
-  const dt = new Date();
-  const hm = dt.getHours()*60 + dt.getMinutes();
-  const wins = [
-    [9*60,        9*60+15,  'otwarcie DAX 09:00'],
-    [14*60+22,    14*60+42, 'publikacje USA 14:30'],
-    [15*60+25,    15*60+45, 'otwarcie Wall Street 15:30'],
-    [15*60+52,    16*60+12, 'dane USA 16:00'],
-    [19*60+52,    20*60+15, 'FOMC / minutes 20:00'],
-  ];
-  for(let q=0;q<wins.length;q++){
-    if(hm >= wins[q][0] && hm <= wins[q][1]){
-      out.macroWindow = wins[q][2];
-      if(atIdx == null){
-        warns.push('Okno makro: ' + wins[q][2] + ' — podwyższona zmienność (wejścia NIE są blokowane, uważaj na szarpnięcia)');
-      }
-      break;
+  /* okna makro / otwarcia sesji w czasie LOKALNYM rynków [A6] — informacyjnie;
+     w backteście liczone z czasu świecy (parytet validate↔serve) */
+  const mwDt = isLive ? new Date() : new Date(c.t*1000);
+  const mw = macroWindow(mwDt);
+  if(mw){
+    out.macroWindow = mw;
+    if(atIdx == null){
+      warns.push('Okno makro: ' + mw + ' — podwyższona zmienność (wejścia NIE są blokowane, uważaj na szarpnięcia)');
     }
   }
 
