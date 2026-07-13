@@ -10,6 +10,26 @@ geometrycznych, analiza **Smart Money Concepts (SMC)**, silnik sygnałów
 > ⚠️ Aplikacja nie stanowi porady inwestycyjnej. Handel CFD wiąże się z wysokim
 > ryzykiem utraty kapitału.
 
+## Zmiany
+
+### v1.4.0 — Etap 1 audytu: krytyczne poprawki metodologii i ryzyka
+
+- **[A1]** trening przez **walk-forward k-fold**; kalibracja isotonic
+  produkcyjna fitowana **wyłącznie na pooled OOS** (nigdy in-sample).
+- **[A2]** kNN (similarity) wyłączone z toru decyzyjnego — zostaje jako
+  diagnostyka UI (parytet validate↔serve).
+- **[A3]** wagi/kalibracja aktywne tylko z flagą `__reliable`; skaner tła
+  i wykres liczą na identycznym modelu.
+- **[A4]** bramka EV liczy z **empirycznej dystrybucji wypłat** (partial+runner,
+  udział BE/TIMEOUT) z pooled OOS; fallback: formuła liniowa.
+- **[A5]** Risk Engine v2: floating risk (tylko na minus), limit jednoczesnych
+  pozycji, doba w UTC, skalowanie ryzyka ×0.5 dla skorelowanej klasy.
+- **[A6]** sesje i okna makro w **czasie lokalnym rynków** (DST-proof, Intl).
+- **[A7]** koszty transakcyjne w paper tradingu + metadane wpisów
+  (prob/ev/evModel/regime/riskPct).
+- **[A10]** higiena: martwy `sawTp2`, fallback ATR bez lookaheadu.
+- testy jednostkowe (`npm test`, node:test) dla całego toru decyzyjnego.
+
 Wcześniej całość była jednym plikiem `index.html` (~5,7 tys. linii, React
 kompilowany w przeglądarce przez Babel + biblioteki z CDN). Została rozbita na
 modułową aplikację **Vite + React** z podziałem na warstwy: dane, wskaźniki,
