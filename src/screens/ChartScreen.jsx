@@ -24,6 +24,7 @@ import { displacement } from '../smc/index.js';
 import { portfolioCheck } from '../signals/portfolio.js';
 import { buildPaperEntry } from '../data/paperEntry.js';
 import { buildStrategyCtx, rankStrategies } from '../strategies/engine.js';
+import { waitStage } from '../signals/waitStage.js';
 import { fmtClock, fmtFull, fmtPct, fmtPrice, fmtVol } from '../utils/format.js';
 import { notifyUser } from '../utils/notify.js';
 
@@ -670,6 +671,12 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
           }}>
           <span className="sig-dir" style={{color: signal.dir > 0 ? '#2fd6ae' : signal.dir < 0 ? '#ff6b5e' : '#8fb0ac'}}>
             {signal.dir > 0 ? 'LONG' : signal.dir < 0 ? 'SHORT' : 'CZEKAJ'}{signal.strong ? ' ★' : ''}
+            {signal.dir === 0 && (() => {
+              /* przechył kierunkowy przy CZEKAJ: dokąd buduje się setup */
+              const ws = waitStage(signal);
+              if(!ws || ws.lean === 0) return null;
+              return <span style={{color: ws.lean > 0 ? '#2fd6ae' : '#ff6b5e', marginLeft:4}}>{ws.lean > 0 ? '▲' : '▼'}</span>;
+            })()}
           </span>
           <span className="sgauge">
             <i style={{width: Math.min(100, Math.abs(signal.score)) + '%',
@@ -680,7 +687,12 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
             <br/>
             {signal.dir !== 0 && signal.levels
               ? 'SL ' + fmtPrice(signal.levels.sl) + ' · TP1 ' + fmtPrice(signal.levels.tp1)
-              : 'brak przewagi (EV/prob poniżej progu)'}
+              : (() => {
+                  const ws = waitStage(signal);
+                  if(!ws) return 'brak przewagi (EV/prob poniżej progu)';
+                  const leanTxt = ws.lean > 0 ? 'buduje się LONG' : ws.lean < 0 ? 'buduje się SHORT' : 'bez przechyłu';
+                  return leanTxt + ' · etap ' + ws.stage + '/' + ws.stages + ': ' + ws.label;
+                })()}
           </span>
           {signal.dir !== 0 && signal.entryQuality && (
             <span className="mono" style={{
