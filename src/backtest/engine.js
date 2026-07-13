@@ -4,6 +4,7 @@ import { detectCandlePatterns } from '../patterns/index.js';
 import { computeSignal } from '../signals/engine.js';
 import { orientedVector } from '../signals/features.js';
 import { trainLogistic, fitIsotonic, brierScore } from '../signals/model.js';
+import { classifyRegime } from '../signals/regime.js';
 import { htfTrend } from '../data/feed.js';
 
 /* ---------------- Faza 6: backtest / alerty ----------------
@@ -156,45 +157,119 @@ export function statsOf(T){
   };
 }
 
-/* WALK-FORWARD: trenuj wagi na pierwszych 60% danych, testuj OUT-OF-SAMPLE na
-   ostatnich 40% z wyuczonymi wagami.
-   K1 (EMBARGO): transakcja otwarta tuż przed splitem rozstrzyga się PO splicie
-   — jej etykieta niesie informację z okresu testowego. Do treningu bierzemy
-   więc wyłącznie próbki ZAMKNIĘTE przed splitem (i1 < split). Zero przecieku.
-   K4: na predykcjach treningowych fitujemy kalibrację isotonic (gdy ≥150
-   próbek), a na OOS liczymy Brier — jedyną uczciwą miarę jakości P.        */
-export function walkForward(candles, ind, emaData, hasVol, sym, minScore, smcCfg, tfId){
+/* kwantyl z listy liczb (interpolowany); null dla pustej listy */
+function quantile(arr, q){
+  if(!arr || !arr.length) return null;
+  const s = arr.slice().sort((a, b) => a - b);
+  const idx = (s.length - 1) * q;
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  return +(s[lo] + (s[hi] - s[lo]) * (idx - lo)).toFixed(4);
+}
+
+/* [A4] Empiryczna dystrybucja wypłat z transakcji OOS. Model liniowy EV
+   zakłada wypłatę pełnego rr1 i zero BE/TIMEOUT — realny schemat (partial
+   na TP1 + runner + spory udział BE) wygląda inaczej. Zwraca null gdy n<30. */
+export function computePayout(trades){
+  if(!trades || trades.length < 30) return null;
+  const n = trades.length;
+  const wins = trades.filter(t => t.out === 'TP1');
+  const be   = trades.filter(t => t.out === 'BE');
+  const to   = trades.filter(t => t.out === 'TIMEOUT');
+  const avg = a => a.length ? a.reduce((s, t) => s + t.r, 0) / a.length : 0;
+  return {
+    n,
+    eWin: wins.length ? +avg(wins).toFixed(3) : null, // śr. R zwycięzcy (partial+runner)
+    pBE: +(be.length / n).toFixed(3), eBE: +avg(be).toFixed(3),
+    pTO: +(to.length / n).toFixed(3), eTO: +avg(to).toFixed(3),
+  };
+}
+
+/* [E2-2] pokrycie reżimów: ile typów reżimu występuje w ≥15% świec danych.
+   Model walidowany tylko w jednym reżimie nie jest dowodem na inne warunki. */
+export function regimeCoverageOf(candles, ind, stride = 5){
+  const counts = {};
+  let total = 0;
+  for(let i = 60; i < candles.length; i += stride){
+    const r = classifyRegime(candles, i, ind.adx.adx, ind.atr);
+    counts[r.type] = (counts[r.type] || 0) + 1;
+    total++;
+  }
+  if(!total) return 0;
+  let cov = 0;
+  for(const k in counts){ if(counts[k] / total >= 0.15) cov++; }
+  return cov;
+}
+
+/* ================= WALK-FORWARD K-FOLD =================
+   Test na ostatnich 50% danych podzielonych na K foldów; dla foldu j wagi
+   trenowane WYŁĄCZNIE na próbkach zamkniętych przed jego startem (embargo K1).
+   [A1] KALIBRACJA PRODUKCYJNA WYŁĄCZNIE Z POOLED OOS: isotonic fitowana na
+   parach (p, y) zebranych z przebiegów foldowych OUT-OF-SAMPLE — nigdy z
+   przebiegu in-sample (tam isotonic dopasowuje się do szumu i zawyża P(win),
+   fałszując bramkę EV i Kelly'ego).
+   opts: { k=4, timeBudgetMs=20000 } (E2-4: twardy budżet czasu).           */
+export function walkForwardKFold(candles, ind, emaData, hasVol, sym, minScore, smcCfg, tfId, opts = {}){
+  const t0 = Date.now();
+  const K = opts.k || 4;
+  const timeBudgetMs = opts.timeBudgetMs != null ? opts.timeBudgetMs : 20000;
+  const overBudget = () => (Date.now() - t0) > timeBudgetMs;
   const n = candles.length;
   if(n < 250) return { ok:false, reason:'za mało danych (min 250 świec)' };
-  const split = Math.floor(n * 0.6);
+
   const base = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { tfId });
-  const trainSamples = base.samples.filter(s => (s.i1 != null ? s.i1 : s.i0) < split); // embargo
-  const tr = trainLogistic(trainSamples, { epochs: 500 });
-  if(!tr.trained) return { ok:false, reason: tr.reason, weights: tr.weights };
+  if(overBudget()) return { ok:false, reason:'przekroczono budżet czasu' };
 
-  /* kalibracja: przelicz backtest z wyuczonymi wagami, weź predykcje z części
-     treningowej (zamknięte przed splitem) i dopasuj isotonic */
-  const withW = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, tfId });
-  const calPairs = withW.trades
-    .filter(t => t.i1 < split && (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
-    .map(t => ({ p: t.prob, y: t.out === 'TP1' ? 1 : 0 }));
-  const calib = fitIsotonic(calPairs, 150); // null gdy < 150 — nie kalibrujemy szumem
+  const testStart = Math.floor(n * 0.5);
+  const foldLen = Math.floor((n - testStart) / K);
+  const pooledOosPairs = [];
+  const pooledOosTrades = [];
+  const folds = [];
+  for(let j = 0; j < K; j++){
+    if(overBudget()) return { ok:false, reason:'przekroczono budżet czasu' };
+    const split = testStart + j * foldLen;
+    const end = (j === K - 1) ? n : split + foldLen;
+    /* embargo: tylko próbki ZAMKNIĘTE przed splitem (i1 < split) */
+    const trainSamples = base.samples.filter(s => (s.i1 != null ? s.i1 : s.i0) < split);
+    const tr = trainLogistic(trainSamples, { epochs: 400 });
+    if(!tr.trained){ folds.push({ split, end, skipped:true, reason: tr.reason }); continue; }
+    const run = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, tfId });
+    const oosTrades = run.trades.filter(t => t.i0 >= split && t.i0 < end);
+    const oosPairs = oosTrades
+      .filter(t => (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
+      .map(t => ({ p: t.prob, y: t.out === 'TP1' ? 1 : 0 }));
+    pooledOosPairs.push(...oosPairs);
+    pooledOosTrades.push(...oosTrades);
+    folds.push({ split, end, nTrain: trainSamples.length, stats: statsOf(oosTrades), brier: brierScore(oosPairs) });
+  }
 
-  /* finalny przebieg: wagi + kalibracja (jeśli jest) — OOS liczony z tego */
-  const finalRun = calib
-    ? backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, calib, tfId })
-    : withW;
-  const oosTrades = finalRun.trades.filter(t => t.i0 >= split);
-  const isTrades  = finalRun.trades.filter(t => t.i1 < split);
-  const oosPairs = oosTrades
-    .filter(t => (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
-    .map(t => ({ p: t.prob, y: t.out === 'TP1' ? 1 : 0 }));
+  const used = folds.filter(f => !f.skipped && f.stats && f.stats.n > 0);
+  const agg = {
+    avgR:    { med: quantile(used.map(f => f.stats.avgR), 0.5), p25: quantile(used.map(f => f.stats.avgR), 0.25) },
+    pf:      { med: quantile(used.map(f => f.stats.pf), 0.5) },
+    winRate: { med: quantile(used.map(f => f.stats.winRate), 0.5) },
+    brier:   { med: quantile(folds.filter(f => f.brier != null).map(f => f.brier), 0.5),
+               p75: quantile(folds.filter(f => f.brier != null).map(f => f.brier), 0.75) },
+  };
+
+  /* wagi produkcyjne: trening na wszystkich zamkniętych próbkach */
+  const trProd = trainLogistic(base.samples, { epochs: 500 });
+  if(!trProd.trained) return { ok:false, reason: trProd.reason, weights: trProd.weights };
+  if(overBudget()) return { ok:false, reason:'przekroczono budżet czasu' };
+  const prodRun = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: trProd.weights, tfId });
+  const prodInSample = statsOf(prodRun.trades); // WYŁĄCZNIE diagnostyka — nie do decyzji
+
+  /* [A1] kalibracja produkcyjna TYLKO z pooled OOS (null gdy < 150 par) */
+  const prodCalib = fitIsotonic(pooledOosPairs, 150);
+  const payout = computePayout(pooledOosTrades);
+  const totalNoos = pooledOosTrades.length;
+  const regimeCoverage = regimeCoverageOf(candles, ind);
+
+  const reliable = trProd.reliable && totalNoos >= 100 && (agg.avgR.med || 0) > 0;
 
   return {
-    ok:true, split, weights: tr.weights, calib, training: tr,
-    inSample: statsOf(isTrades), outSample: statsOf(oosTrades), baseline: base.stats,
-    oosBrier: brierScore(oosPairs),      // < 0.25 = lepiej niż moneta
-    reliable: tr.reliable && oosTrades.length >= 30,
-    samples: trainSamples.map(s => ({ x: s.x, y: s.y })), // historia dla kNN (część treningowa, z embargo)
+    ok:true, weights: trProd.weights, calib: prodCalib, training: trProd,
+    folds, agg, totalNoos, oosPairsN: pooledOosPairs.length,
+    payout, prodInSample, regimeCoverage, reliable,
+    samples: base.samples.map(s => ({ x: s.x, y: s.y })), // historia dla kNN (diagnostyka)
   };
 }

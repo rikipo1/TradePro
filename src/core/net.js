@@ -1,10 +1,11 @@
 /* ========================= [2] WARSTWA DANYCH ======================== */
+const W = (typeof window !== 'undefined') ? window : {}; // Node (testy) nie ma window
 export const Net = {
   last: '—',                 // ostatni działający kanał
   mode: null,                // zapamiętany kanał (szybki start)
   blockedUntil: 0,           // bezpiecznik: do kiedy sieć uznana za zablokowaną
-  native: !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()),
-  plugin: !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp),
+  native: !!(W.Capacitor && W.Capacitor.isNativePlatform && W.Capacitor.isNativePlatform()),
+  plugin: !!(W.Capacitor && W.Capacitor.Plugins && W.Capacitor.Plugins.CapacitorHttp),
 };
 
 export const PROXIES = [

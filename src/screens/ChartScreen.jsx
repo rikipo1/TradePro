@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { aiPrompt, buildAiContext, callClaude, callGemini, tolerantJson } from '../ai/index.js';
-import { backtestEngine, walkForward } from '../backtest/engine.js';
+import { backtestEngine, walkForwardKFold } from '../backtest/engine.js';
 import { riskStatus } from '../signals/riskEngine.js';
 import { Store } from '../core/store.js';
 import { ChartCanvas } from '../components/ChartCanvas.jsx';
@@ -1083,16 +1083,20 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   if(bt.busy || !ind || candlesSafe.length < 250){ if(!bt.busy) Bus.show('Do treningu wag trzeba ≥250 świec (zmień interwał na większy zakres)'); return; }
                   setBt({ busy:true, res:null });
                   setTimeout(() => {
-                    const wf = walkForward(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, tf.id);
+                    const wf = walkForwardKFold(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, tf.id);
                     if(wf && wf.ok){
                       Store.set('rt_model_weights', wf.weights);
-                      Store.set('rt_model_calib', wf.calib || null);
+                      Store.set('rt_model_calib', wf.calib || null); // [A1] kalibracja WYŁĄCZNIE z pooled OOS
                       Store.set('rt_knn_history', wf.samples && wf.samples.length >= 40 ? wf.samples : null);
-                      Store.set('rt_model_meta', { n: wf.training.n, reliable: !!wf.reliable, oosBrier: wf.oosBrier, at: Date.now() });
+                      Store.set('rt_model_meta', {
+                        n: wf.training.n, reliable: !!wf.reliable, totalNoos: wf.totalNoos,
+                        oosPairsN: wf.oosPairsN, agg: wf.agg, payout: wf.payout,
+                        regimeCoverage: wf.regimeCoverage, at: Date.now(),
+                      });
                       setWv(v => v + 1);
-                      Bus.show('🧠 OOS: ' + (wf.outSample.n||0) + ' tr · PF ' + (wf.outSample.pf||0) + ' · ' + (wf.outSample.avgR||0) + 'R'
-                        + (wf.oosBrier != null ? ' · Brier ' + wf.oosBrier : '')
-                        + (wf.reliable ? '' : ' · ⚠ MAŁA PRÓBA (n=' + wf.training.n + ') — nie ufaj tym wagom'));
+                      Bus.show('🧠 k-fold OOS: ' + wf.totalNoos + ' tr · med avgR ' + (wf.agg.avgR.med != null ? wf.agg.avgR.med : '—') + 'R'
+                        + (wf.agg.brier.p75 != null ? ' · Brier p75 ' + wf.agg.brier.p75 : '')
+                        + (wf.reliable ? '' : ' · ⚠ NIEWIARYGODNE — model nie będzie używany live'));
                     } else {
                       Bus.show('Trening nieudany: ' + (wf ? wf.reason : 'brak danych'));
                     }
@@ -1154,17 +1158,23 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   )}
                   {bt.res.wf && bt.res.wf.ok && (
                     <div style={{marginTop:12, background:'var(--bg)', border:'1px solid rgba(79,216,255,.3)', borderRadius:12, padding:'10px 12px'}}>
-                      <div className="section-label" style={{padding:'0 0 6px', color:'var(--cyan)'}}>Walk-forward (uczenie wag)</div>
-                      <div className="kv"><b>In-sample (trening 60%)</b><span className="mono">{bt.res.wf.inSample.n} tr · PF {bt.res.wf.inSample.pf} · {bt.res.wf.inSample.avgR}R</span></div>
-                      <div className="kv"><b>Out-of-sample (test 40%)</b><span className="mono" style={{color: (bt.res.wf.outSample.avgR||0) > 0 ? 'var(--up)' : 'var(--down)', fontWeight:700}}>{bt.res.wf.outSample.n||0} tr · PF {bt.res.wf.outSample.pf||0} · {bt.res.wf.outSample.avgR||0}R</span></div>
-                      <div className="kv"><b>Baseline (wagi domyślne)</b><span className="mono">{bt.res.wf.baseline ? bt.res.wf.baseline.n : '—'} tr · {bt.res.wf.baseline ? bt.res.wf.baseline.avgR : '—'}R</span></div>
-                      {bt.res.wf.oosBrier != null && (
-                        <div className="kv"><b>Brier OOS (kalibracja P)</b><span className="mono" style={{color: bt.res.wf.oosBrier < 0.24 ? 'var(--up)' : 'var(--ema9)'}}>{bt.res.wf.oosBrier}<span style={{color:'var(--dim2)', fontWeight:500}}> (0.25 = moneta)</span></span></div>
+                      <div className="section-label" style={{padding:'0 0 6px', color:'var(--cyan)'}}>Walk-forward k-fold (uczenie wag)</div>
+                      {bt.res.wf.folds.map((f, k) => (
+                        <div className="kv" key={k}><b>Fold {k+1}</b><span className="mono">
+                          {f.skipped ? ('pominięty: ' + f.reason)
+                            : (f.stats.n + ' tr · ' + (f.stats.avgR != null ? f.stats.avgR : '—') + 'R · PF ' + f.stats.pf + (f.brier != null ? ' · Brier ' + f.brier : ''))}
+                        </span></div>
+                      ))}
+                      <div className="kv"><b>OOS łącznie (pooled)</b><span className="mono" style={{color: (bt.res.wf.agg.avgR.med||0) > 0 ? 'var(--up)' : 'var(--down)', fontWeight:700}}>{bt.res.wf.totalNoos} tr · med avgR {bt.res.wf.agg.avgR.med != null ? bt.res.wf.agg.avgR.med : '—'}R · p25 {bt.res.wf.agg.avgR.p25 != null ? bt.res.wf.agg.avgR.p25 : '—'}R</span></div>
+                      {bt.res.wf.agg.brier.p75 != null && (
+                        <div className="kv"><b>Brier p75 (foldy OOS)</b><span className="mono" style={{color: bt.res.wf.agg.brier.p75 < 0.25 ? 'var(--up)' : 'var(--ema9)'}}>{bt.res.wf.agg.brier.p75}<span style={{color:'var(--dim2)', fontWeight:500}}> (0.25 = moneta)</span></span></div>
                       )}
+                      <div className="kv"><b>Kalibracja produkcyjna</b><span className="mono">{bt.res.wf.calib ? ('isotonic z ' + bt.res.wf.oosPairsN + ' par OOS') : ('wyłączona (' + bt.res.wf.oosPairsN + ' par OOS < 150)')}</span></div>
+                      <div className="kv"><b>In-sample (diagnostyka)</b><span className="mono" style={{color:'var(--dim2)'}}>{bt.res.wf.prodInSample.n} tr · {bt.res.wf.prodInSample.avgR}R</span></div>
                       {!bt.res.wf.reliable && (
-                        <div style={{fontSize:10.5, color:'var(--ema9)', marginTop:5, lineHeight:1.55}}>⚠ Próba treningowa n={bt.res.wf.training.n} &lt; 150 lub OOS &lt; 30 transakcji — wynik statystycznie SŁABY. Traktuj jako eksperyment, nie dowód.</div>
+                        <div style={{fontSize:10.5, color:'var(--ema9)', marginTop:5, lineHeight:1.55}}>⚠ Model NIEWIARYGODNY — silnik live pozostaje na wagach domyślnych i stałym sizingu, dopóki k-fold OOS nie przejdzie progów.</div>
                       )}
-                      <div style={{fontSize:10.5, color:'var(--dim2)', marginTop:5, lineHeight:1.55}}>OOS to jedyny uczciwy dowód przewagi. Jeśli OOS PF ≤ 1 lub avgR ≤ 0 — model NIE ma edge na tym instrumencie; nie ufaj wyuczonym wagom. Trening z embargo (bez przecieku etykiet przez granicę splitu), HTF liczony identycznie jak live.</div>
+                      <div style={{fontSize:10.5, color:'var(--dim2)', marginTop:5, lineHeight:1.55}}>Kalibracja isotonic fitowana WYŁĄCZNIE na pooled OOS (nigdy in-sample). Trening z embargo, HTF liczony identycznie jak live. OOS to jedyny uczciwy dowód przewagi.</div>
                     </div>
                   )}
                   <div style={{marginTop:12, fontSize:11, color:'var(--dim2)', lineHeight:1.65}}>
