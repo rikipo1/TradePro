@@ -30,7 +30,9 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   const v = a => (a && a[i] != null) ? a[i] : null;
   let atr = v(ind.atr);
   if(atr == null){
-    for(let q=ind.atr.length-1;q>=0;q--){ if(ind.atr[q] != null){ atr = ind.atr[q]; break; } }
+    /* [A10] fallback ATR wstecz OD i — skan od końca serii był formalnym
+       lookaheadem w backteście (ATR z przyszłości względem świecy i) */
+    for(let q=i;q>=0;q--){ if(ind.atr[q] != null){ atr = ind.atr[q]; break; } }
   }
   if(!atr) return null;
 

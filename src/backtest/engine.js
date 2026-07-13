@@ -44,7 +44,7 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
         let r, out2, tp2f = false;
         if(open.stage === 'open'){ r = -1 - costR; out2 = 'SL'; }
         else if(open.stage === 'be'){ r = rOf(open.slCur) - costR; out2 = 'BE'; }
-        else { r = open.banked + 0.5*rOf(open.slCur) - costR; out2 = 'TP1'; tp2f = open.sawTp2 === true; }
+        else { r = open.banked + 0.5*rOf(open.slCur) - costR; out2 = 'TP1'; tp2f = false; }
         close({ i0:open.i0, i1:i, dir, r:+r.toFixed(3), out:out2, tp2:tp2f, prob:open.prob });
         open = null; cooldownUntil = i + 5;
         continue;
@@ -77,7 +77,8 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
         const aI = ind.atr[i] != null ? ind.atr[i] : open.risk*0.5;
         open.slCur = dir === 1 ? Math.max(open.slCur, ext - aI*0.25)
                                : Math.min(open.slCur, ext + aI*0.25);
-        if(dir === 1 ? c.h >= open.tp2 : c.l <= open.tp2) open.sawTp2 = true;
+        /* [A10] usunięty martwy warunek sawTp2 — dotknięcie TP2 zamyka runnera
+           powyżej (tp2:true), a SL-first w tej samej świecy ma zostać SL */
       }
       if(i - open.i0 >= maxBars){                              // time-stop
         const base = open.stage === 'runner' ? open.banked + 0.5*rOf(c.c) : rOf(c.c);
