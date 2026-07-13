@@ -1,5 +1,5 @@
 import { spreadPx } from '../constants/instruments.js';
-import { getChart, htfTrend } from '../data/feed.js';
+import { getChart, htfTrend, TF_SEC } from '../data/feed.js';
 import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
 import { detectPatterns, zigzag } from '../patterns/index.js';
 import { displacement, relativeVolume, smcAnalyze } from '../smc/index.js';
@@ -25,6 +25,15 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   const livePrice = candles[n-1] ? candles[n-1].c : null;
   const i = isLive ? n - 2 : atIdx;
   if(!ind || i < 30) return null;
+  /* [E3-1] TWARDA bramka świeżości danych: świece starsze niż 2×TF+90 s
+     nie mogą produkować sygnału (badge w UI to za mało — decyzja na starych
+     danych jest gorsza niż brak decyzji) */
+  if(isLive && srOverride && srOverride.__tfSec){
+    const lastT = candles[n-1] ? candles[n-1].t : null;
+    if(lastT && (Date.now()/1000 - lastT) > srOverride.__tfSec*2 + 90){
+      return { stale:true, dir:0, score:0, prob:0.5, reasons:[], warns:['⛔ Dane nieaktualne (świeca starsza niż 2×TF+90 s) — sygnał wstrzymany do odświeżenia feedu'], session:null };
+    }
+  }
   const c = candles[i];
   const price = isLive ? (livePrice != null ? livePrice : c.c) : c.c;
   const v = a => (a && a[i] != null) ? a[i] : null;
@@ -587,6 +596,7 @@ export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, 
   /* [A3] skaner tła musi używać modelu na tych samych zasadach co wykres */
   srWithHtf.__reliable = !!reliable && !!weights;
   srWithHtf.__payout = payout || null;
+  srWithHtf.__tfSec = TF_SEC[tf.id] || 300; // [E3-1] bramka stale także w skanerze
   const signal = computeSignal(data.candles, pack.ind, pack.emaData, patterns, pack.hasVol, null, srWithHtf);
   return { data, signal, demo: !!data.demo };
 }

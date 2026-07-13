@@ -12,6 +12,7 @@ import { InfoScreen } from './screens/InfoScreen.jsx';
 import { JournalScreen } from './screens/JournalScreen.jsx';
 import { WatchlistScreen } from './screens/WatchlistScreen.jsx';
 import { analyzeSymbol } from './signals/engine.js';
+import { rollingStats, degradation } from './signals/monitor.js';
 import { correlationMatrix, duplicatesExposure } from './signals/correlation.js';
 import { fmtPrice } from './utils/format.js';
 import { notifyUser } from './utils/notify.js';
@@ -102,6 +103,21 @@ export function App(){
     });
     return { floatingR: +fl.toFixed(2), openCount: oc };
   };
+
+  /* [E3-1] Monitoring Engine: degradacja modelu ⇒ AUTOMATYCZNY revert
+     (reliable=false → DEFAULT_WEIGHTS, stały sizing, kalibracja off) */
+  useEffect(() => {
+    const meta = Store.get('rt_model_meta', null);
+    if(!meta || !meta.reliable || !meta.sym) return;
+    const roll = rollingStats(journal, meta.sym, meta.tf, 30);
+    const deg = degradation(roll, meta);
+    if(deg.degraded){
+      Store.set('rt_model_meta', { ...meta, reliable:false, stage:'off', reliableStreak:0, degradedAt: Date.now(), degradedWhy: deg.reasons });
+      const msg = '⚠ Degradacja modelu ' + meta.sym + '·' + meta.tf + ': warunki rynkowe przestały odpowiadać walidacji';
+      notifyUser('Rikipo Trader — degradacja modelu', msg + ' (' + deg.reasons.join('; ') + '). Model przełączony na wagi domyślne do czasu retrenu.');
+      Bus.show(msg);
+    }
+  }, [journal]);
 
   /* monitor otwartych pozycji paper (co 15 s, także poza aktywnym wykresem) */
   useEffect(() => {

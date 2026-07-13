@@ -1,5 +1,5 @@
 import { Bus } from '../core/bus.js';
-import { fetchJson } from '../core/net.js';
+import { Net, fetchJson } from '../core/net.js';
 import { CAP_MAP, capEnabled, capWarned, capitalChart, setCapWarned } from './capital.js';
 import { stooqDaily } from './stooq.js';
 import { yahooChart } from './yahoo.js';
@@ -115,9 +115,27 @@ export function htfTrend(candles, tfId){
   else dir = structDir !== 0 ? structDir : emaDir;
   return { dir, label: map.label };
 }
+/* [E3-1] licznik świeżości/luk per źródło (ostatnie 24 h) — widoczny w INFO */
+export const FeedHealth = { bySrc: {} };
+function feedHealthNote(src, staleFlag){
+  const now = Date.now();
+  let h = FeedHealth.bySrc[src];
+  if(!h || now - h.since > 24*3600*1000){ h = { since: now, checks: 0, stale: 0 }; FeedHealth.bySrc[src] = h; }
+  h.checks++;
+  if(staleFlag) h.stale++;
+  h.lastTs = now;
+}
+
 /* wybór źródła: tylko realne dane na żywo (DEMO usunięte) */
 export async function getChart(symbol, tf, source){
   const r = await fetchChart(symbol, tf);
   r.demo = false;
+  try{
+    const last = r.candles && r.candles.length ? r.candles[r.candles.length-1] : null;
+    const step = TF_SEC[tf.id] || 300;
+    const stale = !!(last && (Date.now()/1000 - last.t) > step*2 + 90);
+    r.stale = stale;
+    feedHealthNote(Net.last || '—', stale);
+  }catch(e){}
   return r;
 }

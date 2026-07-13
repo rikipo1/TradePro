@@ -281,6 +281,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     const mMeta = Store.get('rt_model_meta', null);
     srWithHtf.__reliable = !!(mMeta && mMeta.reliable); // [A3] parytet skaner↔wykres
     srWithHtf.__payout = mMeta ? (mMeta.payout || null) : null; // [A4] EV empiryczne
+    srWithHtf.__tfSec = TF_SEC[tf.id] || 300; // [E3-1] twarda bramka stale
     if(prefs.minProb != null) srWithHtf.__minProb = prefs.minProb;
     return computeSignal(candlesSafe, ind, emaData, patterns, hasVol, null, srWithHtf);
   }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.minProb, prefs.waitPullback, prefs.smc, item.sym, wv]);
@@ -1123,6 +1124,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       Store.set('rt_model_calib', wf.calib || null); // [A1] kalibracja WYŁĄCZNIE z pooled OOS
                       Store.set('rt_knn_history', wf.samples && wf.samples.length >= 40 ? wf.samples : null);
                       const meta = {
+                        sym: item.sym, tf: tf.id, // [E3-1] monitoring wie, czego pilnować
                         n: wf.training.n,
                         reliable: st.stage === 'active', // konsumenci __reliable bez zmian
                         kfReliable: !!wf.reliable, reliableWhy: wf.reliableWhy || [],

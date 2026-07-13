@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { DEFAULT_SMC } from '../constants/defaults.js';
 import { logParamChange } from '../core/paramlog.js';
+import { FeedHealth } from '../data/feed.js';
 import { Bus } from '../core/bus.js';
 import { Net } from '../core/net.js';
 import { Store } from '../core/store.js';
@@ -547,6 +548,22 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
           Symulowane świece (DEMO) zostały usunięte.
           Pełną stabilność sieci daje aplikacja APK (natywny HTTP) lub plik otwarty w Chrome.
         </div>
+        {(() => {
+          /* [E3-1] data monitoring: świeżość per źródło (ostatnie 24 h) */
+          const srcs = Object.entries(FeedHealth.bySrc || {});
+          if(!srcs.length) return null;
+          return (
+            <div style={{marginTop:8, paddingTop:8, borderTop:'1px solid var(--border)'}}>
+              <div style={{fontSize:11, color:'var(--dim2)', marginBottom:4}}>Świeżość danych (24 h): pobrania / z opóźnieniem &gt;2×TF+90 s</div>
+              {srcs.map(([src, h]) => (
+                <div key={src} className="kv" style={{fontSize:11.5}}>
+                  <b style={{color:'var(--dim)'}}>{src}</b>
+                  <span className="mono" style={{color: h.stale > h.checks * 0.2 ? 'var(--ema9)' : 'var(--dim)'}}>{h.checks} / {h.stale} stale</span>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </div>
 
       <div className="card" style={{borderColor:'rgba(255,138,117,.25)'}}>
@@ -558,7 +575,7 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
       </div>
 
       <div style={{textAlign:'center', padding:'10px 0 22px', fontSize:10.5, color:'var(--dim2)'}} className="mono">
-        Rikipo Trader v1.3.3 · auto-epic + diag · motyw Baltic Dawn
+        Rikipo Trader v1.7.0 · audyt instytucjonalny E1–E4 · motyw Baltic Dawn
       </div>
     </div>
   );

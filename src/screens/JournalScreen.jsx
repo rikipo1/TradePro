@@ -6,6 +6,8 @@ import { CAP_MAP, capEnabled, capitalTick } from '../data/capital.js';
 import { fetchQuotes } from '../data/feed.js';
 import { paperFloating } from '../data/paper.js';
 import { riskStatus } from '../signals/riskEngine.js';
+import { rollingStats, degradation } from '../signals/monitor.js';
+import { Store } from '../core/store.js';
 import { fmtPrice, pad2 } from '../utils/format.js';
 
 export function fmtDT(ts){
@@ -147,6 +149,32 @@ export function JournalScreen({ journal, setJournal }){
         <div className="kv"><b>Średnia R / trade</b><span className="mono">{closed.length ? (sumR/closed.length).toFixed(2) : '—'}</span></div>
         <div className="kv"><b>Profit factor</b><span className="mono">{grossL > 0 ? (grossW/grossL).toFixed(2) : (grossW > 0 ? '∞' : '—')}</span></div>
       </div>
+
+      {(() => {
+        /* [E3-1] Monitoring Engine: rolling stats vs walidacja k-fold */
+        const meta = Store.get('rt_model_meta', null);
+        if(!meta || !meta.sym) return null;
+        const roll = rollingStats(journal, meta.sym, meta.tf, 30);
+        const deg = degradation(roll, meta);
+        return (
+          <div className="card" style={{marginTop:2, borderColor: deg.degraded || meta.degradedAt ? 'rgba(255,201,77,.45)' : 'var(--border)'}}>
+            <div className="kv"><b>Monitoring modelu · {meta.sym}·{meta.tf}</b>
+              <span className="mono" style={{color: meta.reliable ? 'var(--up)' : 'var(--ema9)'}}>
+                {meta.reliable ? 'AKTYWNY' : (meta.degradedAt ? 'ZDEGRADOWANY → wagi domyślne' : 'nieaktywny')}
+              </span>
+            </div>
+            <div className="kv"><b>Rolling (ost. {roll.n})</b>
+              <span className="mono">{roll.n ? (roll.avgR + 'R · traf. ' + (roll.winRate != null ? roll.winRate + '%' : '—') + ' · PF ' + roll.pf + (roll.brierLive != null ? ' · Brier ' + roll.brierLive : '')) : 'brak zamkniętych transakcji'}</span>
+            </div>
+            {meta.agg && meta.agg.avgR && <div className="kv"><b>Walidacja k-fold</b><span className="mono" style={{color:'var(--dim2)'}}>med {meta.agg.avgR.med != null ? meta.agg.avgR.med : '—'}R · p25 {meta.agg.avgR.p25 != null ? meta.agg.avgR.p25 : '—'}R</span></div>}
+            {(deg.degraded || meta.degradedWhy) && (
+              <div style={{fontSize:11.5, color:'var(--ema9)', paddingTop:2, lineHeight:1.5}}>
+                ⚠ {((deg.degraded ? deg.reasons : meta.degradedWhy) || []).join(' · ')} — model przełączony na wagi domyślne do czasu ponownego treningu.
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="section-label">Wpisy · {journal.length}</div>
       <div>
