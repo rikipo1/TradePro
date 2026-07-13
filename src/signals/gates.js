@@ -51,11 +51,11 @@ export function evGate(prob, levels, payout, costMult, minProb) {
   const evModel = evEmp != null ? 'empirical' : 'linear';
   if (prob < minProb || ev <= 0) {
     return {
-      pass: false, ev, evModel,
+      pass: false, ev, evModel, costR,
       warn: 'Odrzucony przez EV/prob: P(win) ' + Math.round(prob * 100) + '% · EV ' + ev.toFixed(2) + 'R (próg P ' + Math.round(minProb * 100) + '%, wymagane EV>0)',
     };
   }
-  return { pass: true, ev, evModel, warn: null };
+  return { pass: true, ev, evModel, costR, warn: null };
 }
 
 /* filtr sesji: weekend/cienki rynek blokuje, overlap premiuje */

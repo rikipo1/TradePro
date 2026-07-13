@@ -283,6 +283,14 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     srWithHtf.__reliable = !!(mMeta && mMeta.reliable); // [A3] parytet skaner↔wykres
     srWithHtf.__payout = mMeta ? (mMeta.payout || null) : null; // [A4] EV empiryczne
     srWithHtf.__tfSec = TF_SEC[tf.id] || 300; // [E3-1] twarda bramka stale
+    /* [E4-2] drawdown dziennika (R) → tryb obronny sizingu */
+    {
+      let peak = 0, cur = 0, dd = 0;
+      journal.filter(e => e.result && e.result !== 'open' && e.result !== 'pending' && e.result !== 'cancelled')
+        .slice().sort((a, b) => (a.exitTs || a.ts || 0) - (b.exitTs || b.ts || 0))
+        .forEach(e => { cur += (e.r || 0); if(cur > peak) peak = cur; if(peak - cur > dd) dd = peak - cur; });
+      srWithHtf.__ddR = +dd.toFixed(2);
+    }
     if(prefs.minProb != null) srWithHtf.__minProb = prefs.minProb;
     return computeSignal(candlesSafe, ind, emaData, patterns, hasVol, null, srWithHtf);
   }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.minProb, prefs.waitPullback, prefs.smc, item.sym, wv]);
@@ -825,7 +833,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 <span className="mono" style={{fontSize:11, fontWeight:800, padding:'3px 8px', borderRadius:7, background: signal.setupScore>=66?'rgba(47,214,174,.15)':signal.setupScore>=52?'rgba(255,201,77,.15)':'rgba(143,176,172,.1)', color: signal.setupScore>=66?'var(--up)':signal.setupScore>=52?'var(--ema9)':'var(--dim)'}}>P(win) {signal.setupScore}%</span>
                 {signal.ev != null && <span className="mono" style={{fontSize:11, fontWeight:700, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border2)', color: signal.ev>0?'var(--up)':'var(--down)'}}>EV {signal.ev>0?'+':''}{signal.ev}R</span>}
                 {signal.regime && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color:'var(--dim)'}}>{signal.regime.type} · ADX {signal.regime.adx}</span>}
-                {signal.sizing && signal.dir !== 0 && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color:'var(--dim)'}}>ryzyko {signal.sizing.riskPct}%</span>}
+                {signal.sizing && signal.dir !== 0 && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color: signal.sizing.defensive ? 'var(--ema9)' : 'var(--dim)'}}>ryzyko {signal.sizing.riskPct}%{signal.sizing.defensive ? ' · tryb obronny (DD>5R)' : ''}</span>}
                 {signal.similar && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid rgba(79,216,255,.3)', color:'var(--cyan)'}}>≈ {signal.similar.n} podobnych: {signal.similar.wins}/{signal.similar.n} traf</span>}
               </div>
             )}

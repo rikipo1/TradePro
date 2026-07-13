@@ -1267,9 +1267,11 @@
   "ev": 0.584,
   "sizing": {
    "riskPct": 1,
-   "fullKellyPct": 32.8,
-   "edge": 0.5912959537390946,
-   "volMult": 1
+   "fullKellyPct": 32.4,
+   "edge": 0.5837268507742882,
+   "volMult": 1,
+   "scale": 1,
+   "defensive": false
   },
   "prob": 0.568,
   "setupScore": 57,

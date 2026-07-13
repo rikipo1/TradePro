@@ -426,7 +426,11 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
       warns.push(g.warn);
       out.dir = 0; dir = 0; delete out.levels; out.evBlock = true;
     } else {
-      out.sizing = positionSizing(prob, out.levels.rr1 || 1.5, { volState: regime.volState });
+      /* [E4-2] sizing z kosztem i trybem obronnym (drawdown dziennika) */
+      out.sizing = positionSizing(prob, out.levels.rr1 || 1.5, {
+        volState: regime.volState, costR: g.costR,
+        ddR: (srOverride && srOverride.__ddR) || 0,
+      });
     }
   }
   out.prob = +prob.toFixed(3);
