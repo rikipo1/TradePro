@@ -121,6 +121,22 @@ export function JournalScreen({ journal, setJournal }){
         }}>
           <Ic d={IC.download} size={18} />
         </button>
+        <button className="iconbtn" title="Eksport JSON (tylko dziennik)" onClick={() => {
+          /* [E4-4] eksport JSON samego dziennika (komplet pól decyzyjnych) */
+          if(!journal.length){ Bus.show('Dziennik jest pusty'); return; }
+          try{
+            const json = JSON.stringify({ __app:'RikipoTrader', __type:'journal', __ver:1, __ts:new Date().toISOString(), journal }, null, 1);
+            const blob = new Blob([json], { type:'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'rikipo-dziennik.json';
+            document.body.appendChild(a); a.click();
+            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+            Bus.show('Wyeksportowano dziennik do JSON (' + journal.length + ' wpisów)');
+          }catch(err){ Bus.show('Eksport nieobsługiwany w tym środowisku'); }
+        }}>
+          <span className="mono" style={{fontSize:10, fontWeight:900}}>{'{}'}</span>
+        </button>
         <button className="iconbtn" onClick={loadPx}>
           <span className={busyPx ? 'spin' : ''} style={{display:'flex'}}><Ic d={IC.refresh} size={18} /></span>
         </button>

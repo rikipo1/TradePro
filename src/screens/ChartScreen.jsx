@@ -22,6 +22,7 @@ import { detectPatterns } from '../patterns/index.js';
 import { computeSignal } from '../signals/engine.js';
 import { displacement } from '../smc/index.js';
 import { portfolioCheck } from '../signals/portfolio.js';
+import { buildPaperEntry } from '../data/paperEntry.js';
 import { fmtClock, fmtFull, fmtPct, fmtPrice, fmtVol } from '../utils/format.js';
 import { notifyUser } from '../utils/notify.js';
 
@@ -399,29 +400,12 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const aiAgree = aiRes ? (typeof aiRes.agree_with_engine === 'boolean' ? aiRes.agree_with_engine : (aiVerdict === engineDirTxt)) : null;
   const aiRisks = (aiRes && Array.isArray(aiRes.key_risks)) ? aiRes.key_risks.slice(0, 3) : [];
 
-  /* paper trading — pomocnicy */
-  const makePaper = (dir, entry, sl, tp1, tp2, srcTag, score, eq, sig) => {
-    const risk = Math.abs(entry - sl);
-    const riskPct = sig && sig.sizing ? sig.sizing.riskPct : null;
-    const note = undefined; // wypełnia portfolioCheck w tryOpenPaper [E4-1]
-    return {
-      id: Date.now(), ts: Date.now(), sym:item.sym, name:item.name, tf:tf.id,
-      dir, entry, sl, tp1, tp2, risk,
-      rr1: +(Math.abs(tp1 - entry) / Math.max(risk, 1e-9)).toFixed(2),
-      result:'open', r:0, paper:true, src:(srcTag || 'manual'), score:(score != null ? score : null),
-      entryQuality: eq || null,
-      riskPct, note,
-      modelV: (Store.get('rt_model_meta', null) || {}).modelV || null, // [E3-5]
-      /* [A7] koszt + metadane pod monitoring (E3-1) i raport Shadow-vs-Backtest */
-      spreadPx: sig && sig.levels ? sig.levels.spreadPx : null,
-      prob: sig ? sig.prob : null,
-      ev: sig ? sig.ev : null,
-      evModel: sig ? sig.evModel : null,
-      regime: sig && sig.regime ? sig.regime.type : null,
-      session: sig && sig.session ? sig.session.label : null,      // [E4-4]
-      factors: sig && sig.factors ? { ...sig.factors } : null,     // [E4-4]
-    };
-  };
+  /* paper trading — pomocnicy (budowa wpisu: data/paperEntry.js [E4-4]) */
+  const makePaper = (dir, entry, sl, tp1, tp2, srcTag, score, eq, sig) => buildPaperEntry({
+    sym: item.sym, name: item.name, tfId: tf.id,
+    dir, entry, sl, tp1, tp2, srcTag, score, eq, sig,
+    modelV: (Store.get('rt_model_meta', null) || {}).modelV || null,
+  });
 
   /* [E4-1] każde otwarcie paper przechodzi przez Portfolio Risk Engine
      (cap sumaryczny, korelacje, VaR-lite) — zastępuje klasowe proxy z [A5] */
