@@ -1,4 +1,4 @@
-import { spreadPx } from '../constants/instruments.js';
+import { spreadPx, instrProfile } from '../constants/instruments.js';
 import { findSRZones } from '../indicators/index.js';
 import { detectCandlePatterns } from '../patterns/index.js';
 import { computeSignal } from '../signals/engine.js';
@@ -18,6 +18,7 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
   const res = { trades:[], equity:[0], stats:null, samples:[] };
   if(n < 90 || !ind) return res;
   const patsWrap = { list: detectCandlePatterns(candles, emaData[20], ind.atr, hasVol) };
+  const slipAtr = instrProfile(sym).slipAtr || 0; // [E3-3] poślizg SL per klasa
   const warmup = 60, maxBars = 60;
   let open = null, cooldownUntil = -1, sum = 0;
   const close = t => {
@@ -41,10 +42,14 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
       const stopHit = dir === 1 ? c.l <= open.slCur : c.h >= open.slCur;
 
       if(stopHit){
+        /* [E3-3] fill SL z poślizgiem: slCur − dir·slip, slip = slipAtr·ATR —
+           wyłącznie w backteście (model pesymistyczny; live rozlicza broker) */
+        const slip = (ind.atr[i] != null ? ind.atr[i] : 0) * slipAtr;
+        const fill = open.slCur - dir * slip;
         let r, out2, tp2f = false;
-        if(open.stage === 'open'){ r = -1 - costR; out2 = 'SL'; }
-        else if(open.stage === 'be'){ r = rOf(open.slCur) - costR; out2 = 'BE'; }
-        else { r = open.banked + 0.5*rOf(open.slCur) - costR; out2 = 'TP1'; tp2f = false; }
+        if(open.stage === 'open'){ r = rOf(fill) - costR; out2 = 'SL'; }
+        else if(open.stage === 'be'){ r = rOf(fill) - costR; out2 = 'BE'; }
+        else { r = open.banked + 0.5*rOf(fill) - costR; out2 = 'TP1'; tp2f = false; }
         close({ i0:open.i0, i1:i, dir, r:+r.toFixed(3), out:out2, tp2:tp2f, prob:open.prob });
         open = null; cooldownUntil = i + 5;
         continue;

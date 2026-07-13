@@ -493,6 +493,11 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       Bus.show((strong ? '🔥 ' : '⚡ ') + msg);
     }
     if(prefs.autoTrade && signal.levels && !journal.some(e => e.paper && e.result === 'open' && e.sym === item.sym)){
+      /* [E3-3] okno makro = zakaz dla automatu (ręczne wejście z ostrzeżeniem) */
+      if(signal.autoTradeBlock){
+        Bus.show('⛔ Okno makro: ' + signal.macroWindow + ' — auto-trade zablokowany');
+        return;
+      }
       /* Risk Engine v2 [A5]: floating + limit otwartych + dzienny limit UTC */
       const live = liveRisk ? liveRisk(journal, { [item.sym]: data.price }) : undefined;
       const rs = riskStatus(journal, {}, live);

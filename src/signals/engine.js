@@ -454,9 +454,26 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     }
   }
 
+  /* okna makro w czasie LOKALNYM rynków [A6] — liczone PRZED bramką EV,
+     bo w oknie koszt spreadu realnie rośnie [E3-3] */
+  const profMw = instrProfile((srOverride && srOverride.__sym) || null);
+  const mwDt = isLive ? new Date() : new Date(c.t*1000);
+  const mw = macroWindow(mwDt);
+  if(mw){
+    out.macroWindow = mw;
+    if(profMw.macro){
+      out.autoTradeBlock = true; // [E3-3] automat NIE otwiera w oknie makro
+      if(atIdx == null) warns.push('Okno makro: ' + mw + ' — spread/poślizg ×kilka, AUTO-TRADE zablokowany; wejście ręczne tylko świadomie');
+    } else if(atIdx == null){
+      warns.push('Okno makro: ' + mw + ' — podwyższona zmienność (instrument 24/7, wejścia nieblokowane)');
+    }
+  }
+
   /* --- EV GATE + prob + sizing (Engine v2): akceptacja z prawdopodobieństwa, nie z sumy punktów --- */
   if(out.dir !== 0 && out.levels){
-    const costR = out.levels.slDist > 0 ? (out.levels.spreadPx / out.levels.slDist) : 0;
+    let costR = out.levels.slDist > 0 ? (out.levels.spreadPx / out.levels.slDist) : 0;
+    /* [E3-3] w aktywnym oknie makro spread realnie się rozjeżdża — koszt ×4 */
+    if(out.macroWindow && profMw.macro) costR *= 4;
     /* [A4] EV z empirycznej dystrybucji wypłat (payout z pooled OOS), gdy
        dostępna; formuła liniowa p·rr−(1−p)−koszt tylko jako fallback */
     const payoutEmp = (srOverride && srOverride.__payout) || null;
@@ -485,16 +502,7 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   out.liquidityLevels = { pdh: liq.pdh, pdl: liq.pdl, todayHigh: liq.todayHigh, todayLow: liq.todayLow };
   if(vp) out.vp = vp;
 
-  /* okna makro / otwarcia sesji w czasie LOKALNYM rynków [A6] — informacyjnie;
-     w backteście liczone z czasu świecy (parytet validate↔serve) */
-  const mwDt = isLive ? new Date() : new Date(c.t*1000);
-  const mw = macroWindow(mwDt);
-  if(mw){
-    out.macroWindow = mw;
-    if(atIdx == null){
-      warns.push('Okno makro: ' + mw + ' — podwyższona zmienność (wejścia NIE są blokowane, uważaj na szarpnięcia)');
-    }
-  }
+  /* (okna makro liczone wyżej, przed bramką EV — [E3-3]) */
 
   /* --- FILTR SESJI — cienki rynek = więcej fałszywych ruchów.
      Teraz SPÓJNIE live i backtest (czas ze świecy) + per instrument (crypto 24/7). --- */
