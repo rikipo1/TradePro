@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { walkForwardKFold, computePayout, statsOf } from '../src/backtest/engine.js';
+import { walkForwardKFold, computePayout, statsOf, reliableVerdict } from '../src/backtest/engine.js';
 import { synthCandles, packFor, mulberry32 } from './_synth.js';
 
 function runKfold(n = 700, opts = {}) {
@@ -54,6 +54,28 @@ test('[A4] computePayout: n<30 ⇒ null; rozkład wyników poprawny', () => {
   const nBE = trades.filter(t => t.out === 'BE').length;
   assert.ok(Math.abs(p.pBE - nBE / 40) < 1e-6);
   assert.ok(p.pTO > 0 && p.eTO < 0);
+});
+
+test('[E2-2] reliableVerdict: przypadki graniczne', () => {
+  const agg = (med, p25, brierP75) => ({ avgR: { med, p25 }, pf: { med: 1.3 }, winRate: { med: 45 }, brier: { p75: brierP75 } });
+  const ok = reliableVerdict({ totalNoos: 200, agg: agg(0.1, -0.04, 0.24), regimeCoverage: 2 });
+  assert.equal(ok.reliable, true);
+  assert.deepEqual(ok.failed, []);
+
+  const n199 = reliableVerdict({ totalNoos: 199, agg: agg(0.1, -0.04, 0.24), regimeCoverage: 2 });
+  assert.equal(n199.reliable, false);
+  assert.ok(n199.failed.some(f => /n_oos/.test(f)));
+
+  const p25bad = reliableVerdict({ totalNoos: 200, agg: agg(0.1, -0.06, 0.24), regimeCoverage: 2 });
+  assert.equal(p25bad.reliable, false);
+  assert.ok(p25bad.failed.some(f => /p25/.test(f)));
+
+  const brierBad = reliableVerdict({ totalNoos: 200, agg: agg(0.1, -0.04, 0.25), regimeCoverage: 2 });
+  assert.equal(brierBad.reliable, false);
+
+  const regimeBad = reliableVerdict({ totalNoos: 200, agg: agg(0.1, -0.04, 0.24), regimeCoverage: 1 });
+  assert.equal(regimeBad.reliable, false);
+  assert.ok(regimeBad.failed.some(f => /reżimów/.test(f)));
 });
 
 test('statsOf: podstawowe metryki', () => {

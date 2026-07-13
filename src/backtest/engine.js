@@ -269,12 +269,29 @@ export function walkForwardKFold(candles, ind, emaData, hasVol, sym, minScore, s
   const totalNoos = pooledOosTrades.length;
   const regimeCoverage = regimeCoverageOf(candles, ind);
 
-  const reliable = trProd.reliable && totalNoos >= 100 && (agg.avgR.med || 0) > 0;
+  const verdict = reliableVerdict({ totalNoos, agg, regimeCoverage });
 
   return {
     ok:true, weights: trProd.weights, calib: prodCalib, training: trProd,
     folds, agg, totalNoos, oosPairsN: pooledOosPairs.length,
-    payout, prodInSample, regimeCoverage, reliable,
+    payout, prodInSample, regimeCoverage,
+    reliable: verdict.reliable, reliableWhy: verdict.failed,
     samples: base.samples.map(s => ({ x: s.x, y: s.y })), // historia dla kNN (diagnostyka)
   };
+}
+
+/* [E2-2/A8] Zaostrzony próg wiarygodności modelu. Wszystkie warunki naraz:
+   ≥200 transakcji OOS, mediana avgR > 0, p25 avgR > −0.05 (żaden fold nie
+   może tonąć), Brier p75 < 0.25 (lepiej niż moneta w ≥3/4 foldów),
+   pokrycie ≥2 reżimów (model widziany w więcej niż jednych warunkach). */
+export function reliableVerdict({ totalNoos, agg, regimeCoverage }){
+  const checks = [
+    ['n_oos ≥ 200', totalNoos >= 200],
+    ['med(avgR) > 0', (agg && agg.avgR && agg.avgR.med != null) && agg.avgR.med > 0],
+    ['p25(avgR) > −0.05', (agg && agg.avgR && agg.avgR.p25 != null) && agg.avgR.p25 > -0.05],
+    ['Brier p75 < 0.25', (agg && agg.brier && agg.brier.p75 != null) && agg.brier.p75 < 0.25],
+    ['pokrycie reżimów ≥ 2', regimeCoverage >= 2],
+  ];
+  const failed = checks.filter(c => !c[1]).map(c => c[0]);
+  return { reliable: failed.length === 0, failed };
 }

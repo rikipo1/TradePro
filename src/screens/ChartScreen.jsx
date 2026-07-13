@@ -1111,7 +1111,8 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       Store.set('rt_model_calib', wf.calib || null); // [A1] kalibracja WYŁĄCZNIE z pooled OOS
                       Store.set('rt_knn_history', wf.samples && wf.samples.length >= 40 ? wf.samples : null);
                       Store.set('rt_model_meta', {
-                        n: wf.training.n, reliable: !!wf.reliable, totalNoos: wf.totalNoos,
+                        n: wf.training.n, reliable: !!wf.reliable, reliableWhy: wf.reliableWhy || [],
+                        totalNoos: wf.totalNoos,
                         oosPairsN: wf.oosPairsN, agg: wf.agg, payout: wf.payout,
                         regimeCoverage: wf.regimeCoverage, at: Date.now(),
                       });
@@ -1150,7 +1151,9 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 const meta = Store.get('rt_model_meta', null);
                 return (
                   <div style={{marginTop:6, fontSize:10.5, color: meta && !meta.reliable ? 'var(--ema9)' : 'var(--dim2)'}} className="mono">
-                    Model używa WYUCZONYCH wag{meta ? ' (n=' + meta.n + (meta.reliable ? ', wiarygodne' : ', ⚠ mała próba — traktuj jako eksperyment') + ')' : ''}.
+                    {meta && meta.reliable
+                      ? 'Model używa WYUCZONYCH wag (n=' + meta.n + ', OOS ' + (meta.totalNoos || 0) + ' tr, wiarygodne).'
+                      : 'Wagi zapisane, ale NIEAKTYWNE (live liczy na domyślnych). Powód: ' + ((meta && meta.reliableWhy && meta.reliableWhy.length) ? meta.reliableWhy.join(' · ') : 'model niewiarygodny') + '.'}
                     <button className="mono" style={{marginLeft:8, color:'var(--down)', background:'none', border:'none', textDecoration:'underline'}}
                       onClick={() => { Store.set('rt_model_weights', null); Store.set('rt_model_calib', null); Store.set('rt_model_meta', null); setWv(v=>v+1); Bus.show('Przywrócono wagi domyślne'); }}>reset</button>
                   </div>
@@ -1210,7 +1213,10 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       <div className="kv"><b>Kalibracja produkcyjna</b><span className="mono">{bt.res.wf.calib ? ('isotonic z ' + bt.res.wf.oosPairsN + ' par OOS') : ('wyłączona (' + bt.res.wf.oosPairsN + ' par OOS < 150)')}</span></div>
                       <div className="kv"><b>In-sample (diagnostyka)</b><span className="mono" style={{color:'var(--dim2)'}}>{bt.res.wf.prodInSample.n} tr · {bt.res.wf.prodInSample.avgR}R</span></div>
                       {!bt.res.wf.reliable && (
-                        <div style={{fontSize:10.5, color:'var(--ema9)', marginTop:5, lineHeight:1.55}}>⚠ Model NIEWIARYGODNY — silnik live pozostaje na wagach domyślnych i stałym sizingu, dopóki k-fold OOS nie przejdzie progów.</div>
+                        <div style={{fontSize:10.5, color:'var(--ema9)', marginTop:5, lineHeight:1.55}}>
+                          ⚠ Model NIEWIARYGODNY — silnik live pozostaje na wagach domyślnych i stałym sizingu.
+                          Niespełnione warunki: {(bt.res.wf.reliableWhy || []).join(' · ') || '—'}.
+                        </div>
                       )}
                       <div style={{fontSize:10.5, color:'var(--dim2)', marginTop:5, lineHeight:1.55}}>Kalibracja isotonic fitowana WYŁĄCZNIE na pooled OOS (nigdy in-sample). Trening z embargo, HTF liczony identycznie jak live. OOS to jedyny uczciwy dowód przewagi.</div>
                     </div>
