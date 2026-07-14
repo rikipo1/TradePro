@@ -347,9 +347,140 @@ export function detChartPattern(ctx) {
   };
 }
 
+/* ---- helpery dla nowych strategii ---- */
+function rollHi(candles, i, n) { let m = -Infinity; for (let q = Math.max(0, i - n + 1); q <= i; q++) if (candles[q].h > m) m = candles[q].h; return m; }
+function rollLo(candles, i, n) { let m = Infinity; for (let q = Math.max(0, i - n + 1); q <= i; q++) if (candles[q].l < m) m = candles[q].l; return m; }
+
+/* 16) ICHIMOKU — cena vs chmura Kumo + przecięcie Tenkan/Kijun */
+export function detIchimoku(ctx) {
+  const { candles, i, price } = ctx;
+  if (i < 52) return null;
+  const tenkan = (rollHi(candles, i, 9) + rollLo(candles, i, 9)) / 2;
+  const kijun = (rollHi(candles, i, 26) + rollLo(candles, i, 26)) / 2;
+  const j = i - 26; // chmura rzutowana z przeszłości (senkou przesunięte o 26)
+  const spanA = (((rollHi(candles, j, 9) + rollLo(candles, j, 9)) / 2) + ((rollHi(candles, j, 26) + rollLo(candles, j, 26)) / 2)) / 2;
+  const spanB = (rollHi(candles, j, 52) + rollLo(candles, j, 52)) / 2;
+  const cloudTop = Math.max(spanA, spanB), cloudBot = Math.min(spanA, spanB);
+  let dir = 0;
+  if (price > cloudTop && tenkan > kijun) dir = 1;
+  else if (price < cloudBot && tenkan < kijun) dir = -1;
+  if (dir === 0) return null;
+  const thick = (cloudTop - cloudBot) / (ctx.atr || 1);
+  return {
+    id: 'ichimoku', name: 'Ichimoku (chmura + TK cross)', group: 'trend',
+    dir, base: clamp(48 + (thick > 1 ? 8 : 0), 0, 80),
+    why: ['cena ' + (dir > 0 ? 'nad' : 'pod') + ' chmurą Kumo + Tenkan ' + (dir > 0 ? '>' : '<') + ' Kijun — trend ' + (dir > 0 ? 'wzrostowy' : 'spadkowy') + ' (grubość chmury ' + thick.toFixed(1) + '×ATR)'],
+    invalidates: ['powrót ceny do wnętrza chmury', 'przecięcie Tenkan/Kijun w przeciwną stronę'],
+    conditions: ['chmura po właściwej stronie', 'Chikou span potwierdza'],
+  };
+}
+
+/* 17) SUPERTREND — kierunek trendu z ATR-owych pasm + świeżość flipu */
+function supertrend(candles, atrArr, i, mult, look) {
+  mult = mult || 3; look = look || 150;
+  const start = Math.max(1, i - look);
+  let fU = null, fL = null, trend = 1, prevC = null;
+  for (let q = start; q <= i; q++) {
+    const a = atrArr[q]; if (a == null) continue;
+    const mid = (candles[q].h + candles[q].l) / 2;
+    const bU = mid + mult * a, bL = mid - mult * a;
+    const nU = (fU == null || bU < fU || prevC > fU) ? bU : fU;
+    const nL = (fL == null || bL > fL || prevC < fL) ? bL : fL;
+    if (fU != null) trend = trend === 1 ? (candles[q].c < nL ? -1 : 1) : (candles[q].c > nU ? 1 : -1);
+    fU = nU; fL = nL; prevC = candles[q].c;
+  }
+  return { dir: trend, line: trend === 1 ? fL : fU };
+}
+export function detSupertrend(ctx) {
+  const st = supertrend(ctx.candles, ctx.ind.atr, ctx.i, 3, 150);
+  if (!st || st.dir === 0) return null;
+  const st5 = supertrend(ctx.candles, ctx.ind.atr, ctx.i - 5, 3, 150);
+  const freshFlip = st5 && st5.dir !== st.dir; // zmiana trendu w ostatnich 5 świecach
+  return {
+    id: 'supertrend', name: 'Supertrend (ATR)', group: 'trend',
+    dir: st.dir, base: clamp(freshFlip ? 56 : 46, 0, 78),
+    why: ['Supertrend ' + (st.dir > 0 ? 'wzrostowy' : 'spadkowy') + (freshFlip ? ' — ŚWIEŻY flip (sygnał wejścia)' : ' — trend utrzymany') + ', linia ' + st.line.toFixed(4)],
+    invalidates: ['przebicie linii Supertrend zamknięciem'],
+    conditions: ['świeży flip najsilniejszy', 'zgodność z wyższą ramką'],
+  };
+}
+
+/* 18) DYWERGENCJA RSI — cena robi nowe ekstremum, RSI nie potwierdza */
+export function detDivergence(ctx) {
+  const { piv, ind, i } = ctx;
+  if (!piv || piv.length < 4) return null;
+  const rsi = ind.rsi;
+  const lows = piv.filter(p => p.t === 'L').slice(-2);
+  const highs = piv.filter(p => p.t === 'H').slice(-2);
+  const fresh = arr => arr.length === 2 && (i - arr[1].i) <= 8 && rsi[arr[0].i] != null && rsi[arr[1].i] != null;
+  if (fresh(lows) && lows[1].p < lows[0].p && rsi[lows[1].i] > rsi[lows[0].i] + 2) {
+    return {
+      id: 'divergence', name: 'Dywergencja bycza (RSI)', group: 'reversal', dir: 1, base: 56,
+      why: ['cena niżej (LL), RSI wyżej (HL) — słabnie podaż, możliwe odwrócenie w górę'],
+      invalidates: ['nowy dołek z RSI również niżej'], conditions: ['potwierdzenie świecą odwrócenia', 'reakcja na wsparciu'],
+    };
+  }
+  if (fresh(highs) && highs[1].p > highs[0].p && rsi[highs[1].i] < rsi[highs[0].i] - 2) {
+    return {
+      id: 'divergence', name: 'Dywergencja niedźwiedzia (RSI)', group: 'reversal', dir: -1, base: 56,
+      why: ['cena wyżej (HH), RSI niżej (LH) — słabnie popyt, możliwe odwrócenie w dół'],
+      invalidates: ['nowy szczyt z RSI również wyżej'], conditions: ['potwierdzenie świecą odwrócenia', 'reakcja na oporze'],
+    };
+  }
+  return null;
+}
+
+/* 19) ANCHORED VWAP — VWAP od ostatniego swingu; reakcja jako wsparcie/opór */
+export function detAnchoredVwap(ctx) {
+  if (!ctx.hasVol) return null;
+  const piv = ctx.piv;
+  if (!piv || !piv.length) return null;
+  const anchor = piv[piv.length - 1].i;
+  if (ctx.i - anchor < 5) return null;
+  let pv = 0, vv = 0;
+  for (let q = anchor; q <= ctx.i; q++) { const c = ctx.candles[q]; const tp = (c.h + c.l + c.c) / 3; pv += tp * (c.v || 0); vv += (c.v || 0); }
+  if (vv <= 0) return null;
+  const avwap = pv / vv;
+  const dist = (ctx.price - avwap) / ctx.atr;
+  if (Math.abs(dist) > 0.5) return null;                 // tylko blisko AVWAP
+  const dir = dist >= 0 ? 1 : -1;
+  return {
+    id: 'anchoredVwap', name: 'Anchored VWAP (od swingu)', group: 'vwap',
+    dir, base: 48,
+    why: ['cena przy Anchored VWAP od ostatniego swingu (' + Math.abs(dist).toFixed(2) + '×ATR) — instytucjonalna średnia cena broni poziomu'],
+    invalidates: ['zamknięcie po drugiej stronie AVWAP'],
+    conditions: ['odrzucenie AVWAP knotem', 'zgodność z trendem struktury'],
+  };
+}
+
+/* 20) OPENING RANGE BREAKOUT — wybicie zakresu otwarcia dnia (intraday) */
+export function detORB(ctx) {
+  if (ctx.tfSec >= 3600) return null;                    // tylko interwały śróddzienne
+  const day = Math.floor(ctx.candles[ctx.i].t / 86400);
+  const dayIdx = [];
+  for (let q = Math.max(0, ctx.i - 250); q <= ctx.i; q++) { if (Math.floor(ctx.candles[q].t / 86400) === day) dayIdx.push(q); }
+  if (dayIdx.length < 8) return null;
+  const orBars = dayIdx.slice(0, 6);                     // zakres otwarcia = pierwsze ~6 świec
+  if (ctx.i - orBars[orBars.length - 1] < 1) return null; // po zamknięciu zakresu
+  let orH = -Infinity, orL = Infinity;
+  for (const q of orBars) { if (ctx.candles[q].h > orH) orH = ctx.candles[q].h; if (ctx.candles[q].l < orL) orL = ctx.candles[q].l; }
+  const p = ctx.price;
+  let dir = 0;
+  if (p > orH + ctx.atr * 0.05) dir = 1;
+  else if (p < orL - ctx.atr * 0.05) dir = -1;
+  if (dir === 0) return null;
+  return {
+    id: 'orb', name: 'Opening Range Breakout', group: 'breakout',
+    dir, base: 47,
+    why: ['wybicie ' + (dir > 0 ? 'nad' : 'pod') + ' zakres otwarcia dnia (' + orL.toFixed(2) + '–' + orH.toFixed(2) + ')'],
+    invalidates: ['powrót do zakresu otwarcia (fałszywe wybicie)'],
+    conditions: ['retest krawędzi zakresu utrzymany', 'wolumen na wybiciu'],
+  };
+}
+
 export const ALL_DETECTORS = [
   detTrendFollowing, detMomentum, detBreakout, detBreakRetest,
   detLiquiditySweep, detWyckoffSpring, detMeanReversion, detOrderBlock,
   detFvg, detPremiumDiscount, detVwap, detSqueeze, detSessionDrive, detPivots,
-  detChartPattern,
+  detChartPattern, detIchimoku, detSupertrend, detDivergence, detAnchoredVwap, detORB,
 ];

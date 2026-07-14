@@ -14,6 +14,13 @@ geometrycznych, analiza **Smart Money Concepts (SMC)**, silnik sygnałów
 
 ### v1.8.0 — 🏛 Instytucjonalny silnik rankingu strategii (moduł doradczy)
 
+Aktualizacje: **20 detektorów** (dodane: Figury geometryczne, Ichimoku,
+Supertrend, Dywergencja RSI, Anchored VWAP, Opening Range Breakout);
+**bonus konfluencji / kara za sprzeczność** (strategia zgodna z konsensusem
+wielu metod dostaje +, samotny sprzeczny sygnał −); ranking przeliczany raz
+na świecę (mniej CPU).
+
+
 - **14 detektorów strategii** ocenianych RÓWNOCZEŚNIE na każdej świecy, każdy
   0–100%: Trend Following, Momentum/Expansion, Breakout (Donchian), Break &
   Retest, Liquidity Sweep/Stop Hunt (ICT), Wyckoff Spring/Upthrust, Mean

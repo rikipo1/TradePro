@@ -135,11 +135,25 @@ export function rankStrategies(ctx, journal, opts = {}) {
     const lv = strategyLevels(ctx, r.dir);
     const pe = probEstimate(score, stats, r.id);
     ranking.push({
-      ...r, score, adj,
+      ...r, scoreRaw: score, score, adj,
       levels: lv, probability: pe.p, probabilitySrc: pe.src,
       mults: { regime: +regimeMult.toFixed(2), mtf: +mtfMult.toFixed(2), sess: +sessMult.toFixed(2) },
       learn: learnNote(stats, r.id),
     });
+  }
+
+  /* KONFLUENCJA / SPRZECZNOŚĆ: strategia zgodna z konsensusem wielu innych
+     dostaje bonus, sprzeczna z silnym konsensusem — karę (±). To nagradza
+     sytuacje, gdzie kilka niezależnych metod wskazuje ten sam kierunek. */
+  const sumBull = ranking.filter(r => r.dir > 0).reduce((a, r) => a + r.scoreRaw, 0);
+  const sumBear = ranking.filter(r => r.dir < 0).reduce((a, r) => a + r.scoreRaw, 0);
+  for (const r of ranking) {
+    const agree = (r.dir > 0 ? sumBull : sumBear) - r.scoreRaw; // inne zgodne
+    const oppose = r.dir > 0 ? sumBear : sumBull;               // przeciwne
+    const denom = agree + oppose;
+    const net = denom > 0 ? (agree - oppose) / denom : 0;
+    r.confluence = Math.round(clamp(net * 12, -10, 12));
+    r.score = Math.round(clamp(r.scoreRaw + r.confluence, 0, 99));
   }
   ranking.sort((a, b) => b.score - a.score);
 
@@ -190,7 +204,8 @@ export function rankStrategies(ctx, journal, opts = {}) {
           'wybrano: ' + decision.name + ' (' + decision.score + '%) — ' + decision.why.join('; '),
           'mnożniki: reżim ' + ctx.regime.type + ' ×' + decision.mults.regime
             + ' · MTF ' + (mtf.align >= 0 ? '+' : '') + mtf.align + ' ×' + decision.mults.mtf
-            + ' · sesja ×' + decision.mults.sess,
+            + ' · sesja ×' + decision.mults.sess
+            + (decision.confluence ? ' · konfluencja ' + (decision.confluence > 0 ? '+' : '') + decision.confluence + ' pkt' : ''),
           'uczenie: ' + decision.learn,
         ],
         rejected: rivals.map(r => r.name + ' — ' + r.score + '%'
