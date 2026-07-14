@@ -19,6 +19,21 @@ export function fmtDT(ts){
   const d = new Date(ts);
   return pad2(d.getDate()) + '.' + pad2(d.getMonth()+1) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
 }
+export function fmtHMS(ts){
+  const d = new Date(ts);
+  return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+}
+/* czas trwania pozycji w rynku (czasówka) */
+export function fmtDur(ms){
+  if(ms == null || ms < 0) return '—';
+  const m = Math.round(ms / 60000);
+  if(m < 1) return '<1 min';
+  if(m < 60) return m + ' min';
+  const h = Math.floor(m / 60), mm = m % 60;
+  if(h < 24) return h + 'h' + (mm ? ' ' + mm + 'm' : '');
+  const d = Math.floor(h / 24);
+  return d + 'd ' + (h % 24) + 'h';
+}
 export const RESULT_DEF = [
   ['tp2', 'TP2',  2.5, 'var(--up)'],
   ['tp1', 'TP1',  1.5, 'var(--up)'],
@@ -78,15 +93,25 @@ export function JournalScreen({ journal, setJournal }){
   };
   const closeEntry = (id, key) => {
     const rd = resultOf(key);
-    setJournal(list => list.map(e => e.id === id
-      ? { ...e, result:key, r: (key === 'tp1' && e.rr1) ? e.rr1 : rd[2] }
-      : e));
+    /* [FIX] zapisz CZAS i CENĘ wyjścia — bez tego marker zamknięcia się nie
+       pokazywał, a Risk Engine (doba UTC) używał czasu otwarcia zamiast wyjścia */
+    setJournal(list => list.map(e => {
+      if(e.id !== id) return e;
+      const exitPx = key === 'sl' ? e.sl : key === 'tp1' ? e.tp1 : key === 'tp2' ? e.tp2 : e.entry;
+      return {
+        ...e, result:key,
+        r: (key === 'tp1' && e.rr1) ? e.rr1 : rd[2],
+        exit: exitPx != null ? exitPx : (e.exit != null ? e.exit : null),
+        exitTs: Date.now(),
+      };
+    }));
     setPick(null);
   };
   const addManual = () => {
     const rd = resultOf(mRes);
+    const now = Date.now();
     setJournal(list => [{
-      id: Date.now(), ts: Date.now(), sym: (mSym || '—').toUpperCase(), tf: '—',
+      id: now, ts: now, exitTs: now, sym: (mSym || '—').toUpperCase(), tf: '—',
       dir: mDir, result: mRes, r: rd[2], note: mNote.trim(), src: 'manual',
     }, ...list]);
     setShowAdd(false);
@@ -275,7 +300,8 @@ export function JournalScreen({ journal, setJournal }){
                   {e.src === 'auto' ? <span className="tag" style={{marginLeft:6, color:'var(--ema9)'}}>🤖 bot</span> : null}
                 </div>
                 <div className="wl-sym mono" style={{whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
-                  {fmtDT(e.ts)}
+                  {'⏱ ' + fmtDT(e.ts)}
+                  {(e.exitTs && e.result !== 'open' && e.result !== 'pending') ? ' → ' + fmtHMS(e.exitTs) + ' · ' + fmtDur(e.exitTs - e.ts) : ''}
                   {e.entry != null ? ' · E ' + fmtPrice(e.entry) + ' SL ' + fmtPrice(e.sl) : ''}
                   {e.note ? ' · ' + e.note : ''}
                 </div>
@@ -298,6 +324,19 @@ export function JournalScreen({ journal, setJournal }){
             {isExp && (
               <div style={{borderBottom:'1px solid var(--border)', background:'rgba(4,24,29,.4)'}}>
                 <MiniLiveChart entry={e} />
+                {/* CZASÓWKA: godzina wejścia, wyjścia i czas w rynku */}
+                <div className="mono" style={{padding:'0 14px 8px', fontSize:11.5, color:'var(--dim)', lineHeight:1.7}}>
+                  <div><span style={{color:'var(--dim2)'}}>Wejście:</span> {fmtDT(e.ts)}:{pad2(new Date(e.ts).getSeconds())}
+                    {e.entry != null ? <span style={{color: e.dir > 0 ? 'var(--up)' : 'var(--down)'}}> {e.dir > 0 ? '▲ LONG' : '▼ SHORT'} @ {fmtPrice(e.entry)}</span> : null}</div>
+                  {(e.result !== 'open' && e.result !== 'pending') ? (
+                    <div><span style={{color:'var(--dim2)'}}>Wyjście:</span> {e.exitTs ? fmtDT(e.exitTs) + ':' + pad2(new Date(e.exitTs).getSeconds()) : '—'}
+                      {e.exit != null ? ' @ ' + fmtPrice(e.exit) : ''}
+                      <span style={{color:'var(--dim2)'}}> · czas w rynku: </span><b>{e.exitTs ? fmtDur(e.exitTs - e.ts) : '—'}</b></div>
+                  ) : (
+                    <div><span style={{color:'var(--dim2)'}}>Status:</span> {e.result === 'pending' ? 'oczekuje (LIMIT)' : 'otwarta'}
+                      <span style={{color:'var(--dim2)'}}> · w rynku od: </span><b>{fmtDur(Date.now() - e.ts)}</b></div>
+                  )}
+                </div>
                 {e.result === 'open' && (
                   <div style={{padding:'0 12px 12px', display:'flex', gap:8}}>
                     <button className="chip mono sel" style={{flex:1, justifyContent:'center', color:'var(--down)'}}

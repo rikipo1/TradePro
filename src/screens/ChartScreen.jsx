@@ -320,6 +320,17 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     return ops.find(o => o.kind !== 'signal-now') || null;
   }, [signal]);
 
+  /* znaczniki WEJŚĆ w otwarte pozycje paper na tym symbolu (na wykresie) */
+  const posMarkers = useMemo(() => {
+    return (journal || [])
+      .filter(e => e.paper && e.sym === item.sym && (e.result === 'open' || e.result === 'pending'))
+      .map(e => {
+        const d = new Date(e.ts);
+        const hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+        return { t: Math.floor(e.ts / 1000), price: e.entry, dir: e.dir, label: (e.result === 'pending' ? '⏳ ' : '') + hm };
+      });
+  }, [journal, item.sym]);
+
   const sigLevels = useMemo(() => {
     const out = [];
     if(signal && signal.dir !== 0 && signal.levels){
@@ -850,6 +861,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
           patMap={patterns.patMap}
           focus={focus}
           levels={sigLevels}
+          posMarkers={posMarkers}
           resetKey={item.sym + '|' + tf.id}
         />
         {loading && !candlesSafe.length && (

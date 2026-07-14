@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { EMA_DEFS } from '../indicators/index.js';
 import { CLR, COUNT0, clampEnd, fmtFull, fmtPct, fmtPrice, fmtTime, fmtVol, niceStep } from '../utils/format.js';
 
-export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, overlays, panels, markers, geoLines, patMap, focus, levels }){
+export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, overlays, panels, markers, geoLines, patMap, focus, levels, posMarkers }){
   const wrapRef = useRef(null);
   const cvsRef  = useRef(null);
   const layoutRef = useRef(null);
@@ -576,6 +576,48 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
       ctx.restore();
     }
 
+    /* --- ZNACZNIK WEJŚCIA W POZYCJĘ (otwarte pozycje paper na tym symbolu) --- */
+    if(posMarkers && posMarkers.length){
+      ctx.save();
+      ctx.beginPath(); ctx.rect(plotL, 0, plotW, bottomAll); ctx.clip();
+      for(let m=0;m<posMarkers.length;m++){
+        const pm = posMarkers[m];
+        /* znajdź świecę wejścia po czasie (pm.t w sekundach) */
+        let ei = -1;
+        for(let q=iFrom;q<=iTo;q++){ if(candles[q].t >= pm.t){ ei = q; break; } }
+        const offRight = ei < 0 && pm.t > candles[iTo].t; // wejście świeższe niż widok
+        const x = ei >= 0 ? X(ei) : (offRight ? plotR - 2 : plotL + 2);
+        const col = pm.dir > 0 ? CLR.up : CLR.down;
+        /* pionowa linia wejścia */
+        ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.globalAlpha = 0.55;
+        ctx.setLineDash([2,3]);
+        ctx.beginPath(); ctx.moveTo(x, priceTop); ctx.lineTo(x, bottomAll); ctx.stroke();
+        ctx.setLineDash([]); ctx.globalAlpha = 1;
+        /* trójkąt + etykieta na poziomie wejścia (jeśli w zakresie ceny) */
+        const py = (pm.price >= lo && pm.price <= hi) ? Y(pm.price) : (pm.dir > 0 ? bottomAll - 12 : priceTop + 12);
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        if(pm.dir > 0){ ctx.moveTo(x, py + 9); ctx.lineTo(x - 5, py + 16); ctx.lineTo(x + 5, py + 16); }
+        else { ctx.moveTo(x, py - 9); ctx.lineTo(x - 5, py - 16); ctx.lineTo(x + 5, py - 16); }
+        ctx.closePath(); ctx.fill();
+        /* etykieta „▶ WEJŚCIE HH:MM" nad/pod trójkątem */
+        const lbl = '▶ ' + (pm.dir > 0 ? 'LONG' : 'SHORT') + (pm.label ? ' ' + pm.label : '');
+        ctx.font = '9px JetBrains Mono, monospace';
+        const lw = ctx.measureText(lbl).width;
+        let bx = x - lw/2 - 5;
+        if(bx < plotL + 2) bx = plotL + 2;
+        if(bx + lw + 10 > plotR) bx = plotR - lw - 10;
+        const by = pm.dir > 0 ? py + 18 : py - 32;
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        if(ctx.roundRect) ctx.roundRect(bx, by, lw + 10, 14, 4); else ctx.rect(bx, by, lw + 10, 14);
+        ctx.fill();
+        ctx.fillStyle = '#04181d'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(lbl, bx + 5, by + 7);
+      }
+      ctx.restore();
+    }
+
     /* krzyżyk (crosshair) */
     if(cross != null && cross >= iFrom && cross <= iTo){
       const c = candles[cross];
@@ -595,7 +637,7 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
       ctx.fillStyle = CLR.txt; ctx.textAlign = 'left';
       ctx.fillText(txt, plotR + 8, y);
     }
-  }, [candles, view, cross, emaVis, size, tfId, hasVol, len, overlays, panels, markers, geoLines, levels]);
+  }, [candles, view, cross, emaVis, size, tfId, hasVol, len, overlays, panels, markers, geoLines, levels, posMarkers]);
 
   /* --- panel OHLC dla krzyżyka --- */
   const cc = (cross != null && cross < len) ? candles[cross] : null;
