@@ -122,21 +122,39 @@ export function MiniLiveChart({ entry }){
       ctx.fillRect(x - bw/2, Math.min(yO, yC), bw, Math.max(1, Math.abs(yO - yC)));
     }
 
-    /* znacznik wejścia (pionowa kreska na świecy wejścia) */
+    /* ZNACZNIK WEJŚCIA — wyraźna pionowa linia w kolorze kierunku + trójkąt
+       + etykieta „▶ WEJŚCIE HH:MM" (moment wejścia na wykresie) */
     let entryQ = -1;
     for(let q=0;q<view.length;q++){ if(view[q].t*1000 >= entry.ts){ entryQ = q; break; } }
     if(entryQ >= 0){
       const x = X(entryQ);
-      ctx.strokeStyle = 'rgba(207,228,224,.35)'; ctx.lineWidth = 1;
-      ctx.setLineDash([2,2]);
+      const col = entry.dir > 0 ? '#2fd6ae' : '#ff6b5e';
+      ctx.strokeStyle = col; ctx.lineWidth = 1.4; ctx.globalAlpha = 0.7;
+      ctx.setLineDash([3,3]);
       ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, H - padB); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = entry.dir > 0 ? '#2fd6ae' : '#ff6b5e';
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+      /* trójkąt na poziomie wejścia */
+      ctx.fillStyle = col;
       const ay = Y(entry.entry);
       ctx.beginPath();
-      if(entry.dir > 0){ ctx.moveTo(x, ay+8); ctx.lineTo(x-4, ay+14); ctx.lineTo(x+4, ay+14); }
-      else { ctx.moveTo(x, ay-8); ctx.lineTo(x-4, ay-14); ctx.lineTo(x+4, ay-14); }
+      if(entry.dir > 0){ ctx.moveTo(x, ay+8); ctx.lineTo(x-5, ay+15); ctx.lineTo(x+5, ay+15); }
+      else { ctx.moveTo(x, ay-8); ctx.lineTo(x-5, ay-15); ctx.lineTo(x+5, ay-15); }
       ctx.closePath(); ctx.fill();
+      /* etykieta z godziną wejścia u góry */
+      const ed = new Date(entry.ts);
+      const hm = (ed.getHours()<10?'0':'')+ed.getHours()+':'+(ed.getMinutes()<10?'0':'')+ed.getMinutes();
+      const lbl = '▶ ' + (entry.dir > 0 ? 'LONG' : 'SHORT') + ' ' + hm;
+      ctx.font = '9px JetBrains Mono, monospace';
+      const lw = ctx.measureText(lbl).width;
+      let bx = x - lw/2 - 5;
+      if(bx < plotL) bx = plotL;
+      if(bx + lw + 10 > plotR) bx = plotR - lw - 10;
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      if(ctx.roundRect) ctx.roundRect(bx, padT + 1, lw + 10, 14, 4); else ctx.rect(bx, padT + 1, lw + 10, 14);
+      ctx.fill();
+      ctx.fillStyle = '#04181d'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(lbl, bx + 5, padT + 8);
     }
 
     /* znacznik zamknięcia */
@@ -154,8 +172,10 @@ export function MiniLiveChart({ entry }){
       ctx.fillStyle = win ? '#2fd6ae' : '#ff6b5e';
       ctx.textAlign = x > W/2 ? 'right' : 'left';
       ctx.textBaseline = 'bottom';
+      let xhm = '';
+      if(entry.exitTs){ const xd = new Date(entry.exitTs); xhm = ' ' + (xd.getHours()<10?'0':'')+xd.getHours()+':'+(xd.getMinutes()<10?'0':'')+xd.getMinutes(); }
       const lbl = (entry.result === 'tp2' ? 'TP2' : entry.result === 'tp1' ? 'TP1' : entry.result === 'sl' ? 'SL' : 'EXIT')
-        + ' ' + ((entry.r||0) > 0 ? '+' : '') + (entry.r||0) + 'R';
+        + xhm + ' ' + ((entry.r||0) > 0 ? '+' : '') + (entry.r||0) + 'R';
       ctx.fillText(lbl, x > W/2 ? x - 7 : x + 7, y - 5);
     }
 
