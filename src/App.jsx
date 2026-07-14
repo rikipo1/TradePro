@@ -158,13 +158,13 @@ export function App(){
               const atrArr = atrSeries(cs.slice(-60), 14);
               let atr = null;
               for(let q=atrArr.length-1;q>=0;q--){ if(atrArr[q] != null){ atr = atrArr[q]; break; } }
-              if(atr != null){
-                trailOpts = {
-                  atr,
-                  trailLow: Math.min(...last8.map(c => c.l)),
-                  trailHigh: Math.max(...last8.map(c => c.h)),
-                };
-              }
+              trailOpts = {
+                /* [FIX] świece do wykrywania SL/TP po H/L (knoty między odczytami) */
+                bars: cs.slice(-40),
+                atr,
+                trailLow: Math.min(...last8.map(c => c.l)),
+                trailHigh: Math.max(...last8.map(c => c.h)),
+              };
             }
           }
         }catch(e){}

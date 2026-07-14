@@ -48,7 +48,23 @@ export function resolvePaperList(list, sym, px, notify, opts){
     const stage = e.stage || 'open';
     const slCur = e.slDyn != null ? e.slDyn : e.sl;
     const rOf = (p) => ((p - e.entry) / e.risk) * d;
-    const stopHit = d === 1 ? px <= slCur : px >= slCur;
+    /* [FIX] SL/TP względem EKSTREMÓW świec OD WEJŚCIA, nie tylko próbkowanej
+       ceny — inaczej knot dotykający SL między odczytami (co 15 s) był
+       pomijany i pozycja wisiała otwarta zamiast zamknąć się na −1R.
+       worstPx = najgorsza cena dla pozycji, bestPx = najlepsza (pesymizm:
+       SL sprawdzany PRZED TP). Świece brane od e.ts (z 60 s zapasem). */
+    let barLo = null, barHi = null;
+    if(opts && opts.bars && opts.bars.length){
+      for(let q = opts.bars.length - 1; q >= 0; q--){
+        const b = opts.bars[q];
+        if(b.t * 1000 < e.ts - 60000) break;
+        if(barLo == null || b.l < barLo) barLo = b.l;
+        if(barHi == null || b.h > barHi) barHi = b.h;
+      }
+    }
+    const worstPx = d === 1 ? (barLo != null ? Math.min(px, barLo) : px) : (barHi != null ? Math.max(px, barHi) : px);
+    const bestPx  = d === 1 ? (barHi != null ? Math.max(px, barHi) : px) : (barLo != null ? Math.min(px, barLo) : px);
+    const stopHit = d === 1 ? worstPx <= slCur : worstPx >= slCur;
     /* [A7] koszt transakcyjny w R: jawny costR albo spread/risk — bez tego
        dziennik paper był systematycznie LEPSZY od pesymistycznego backtestu */
     const costR = e.costR != null ? e.costR : (e.risk > 0 && e.spreadPx != null ? e.spreadPx / e.risk : 0);
@@ -68,11 +84,11 @@ export function resolvePaperList(list, sym, px, notify, opts){
     let ne = e, mut = false;
     const bump = () => { if(!mut){ ne = { ...e }; mut = true; } };
 
-    if(stage === 'open' && rOf(px) >= 1){                    // +1R → stop na BE
+    if(stage === 'open' && rOf(bestPx) >= 1){               // +1R (intra-świeca) → stop na BE
       bump(); ne.stage = 'be'; ne.slDyn = e.entry;
     }
     const st2 = ne.stage || 'open';
-    if((st2 === 'open' || st2 === 'be') && (d === 1 ? px >= e.tp1 : px <= e.tp1)){
+    if((st2 === 'open' || st2 === 'be') && (d === 1 ? bestPx >= e.tp1 : bestPx <= e.tp1)){
       bump();                                                 // TP1 → partial 50%
       ne.stage = 'runner';
       ne.banked = +(0.5 * (e.rr1 || 1.5)).toFixed(2);
@@ -81,7 +97,7 @@ export function resolvePaperList(list, sym, px, notify, opts){
       ne.partialTs = Date.now();
     }
     if((ne.stage || stage) === 'runner'){
-      if(e.tp2 != null && (d === 1 ? px >= e.tp2 : px <= e.tp2)){  // TP2 → koniec
+      if(e.tp2 != null && (d === 1 ? bestPx >= e.tp2 : bestPx <= e.tp2)){  // TP2 (intra-świeca) → koniec
         changed = true;
         const r = +(((ne.banked != null ? ne.banked : e.banked) || 0) + 0.5 * rOf(e.tp2) - costR).toFixed(2);
         const done = { ...(mut ? ne : e), result:'tp2', r, exit:e.tp2, exitTs:Date.now() };
