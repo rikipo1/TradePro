@@ -419,6 +419,8 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     }
   };
   const aiKeySet = (ai.provider || 'claude') === 'gemini' ? !!ai.keyGemini : !!ai.keyClaude;
+  /* kolor paska gotowości: czerwony → żółty → zielony */
+  const readyColor = (pct) => pct >= 85 ? '#2fd6ae' : pct >= 50 ? '#ffc94d' : '#ff6b5e';
   const aiRes = aiState.res;
   const aiVerdict = aiRes ? String(aiRes.verdict || 'WAIT').toUpperCase() : null;
   const aiVerdictCol = aiVerdict === 'LONG' ? 'var(--up)' : aiVerdict === 'SHORT' ? 'var(--down)' : 'var(--dim)';
@@ -679,8 +681,15 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
             })()}
           </span>
           <span className="sgauge">
-            <i style={{width: Math.min(100, Math.abs(signal.score)) + '%',
-              background: signal.dir > 0 ? '#2fd6ae' : signal.dir < 0 ? '#ff6b5e' : '#8fb0ac'}} />
+            {(() => {
+              /* aktywny sygnał = 100% gotowości; CZEKAJ = etap lejka / 6 */
+              if(signal.dir !== 0){
+                return <i style={{width: '100%', background: signal.dir > 0 ? '#2fd6ae' : '#ff6b5e'}} />;
+              }
+              const ws = waitStage(signal);
+              const ready = ws ? Math.round(ws.stage / ws.stages * 100) : 0;
+              return <i style={{width: Math.max(6, ready) + '%', background: readyColor(ready)}} />;
+            })()}
           </span>
           <span className="sig-meta mono" style={{color:'var(--dim)'}}>
             {signal.setupScore != null ? 'P(win) ' + signal.setupScore + '%' + (signal.ev != null ? ' · EV ' + (signal.ev>0?'+':'') + signal.ev + 'R' : '') : 'confluence ' + (signal.score > 0 ? '+' : '') + signal.score}
@@ -710,57 +719,65 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
         </button>
       )}
 
-      {/* 🏛 pasek werdyktu rankingu strategii — widoczny od razu, jak pasek silnika */}
+      {/* 🏛 pasek werdyktu rankingu strategii — układ kolumnowy z paskiem gotowości */}
       {stratRank && (() => {
         const sr = stratRank;
         const active = sr.dir !== 0 && sr.levels;
         const top = sr.ranking && sr.ranking[0];
         const dcol = sr.dir > 0 ? '#2fd6ae' : sr.dir < 0 ? '#ff6b5e' : '#8fb0ac';
         const canOpen = active && !journal.some(e => e.paper && (e.result === 'open' || e.result === 'pending') && e.sym === item.sym);
+        /* gotowość: jak blisko progu 60% jest najlepsza strategia (100% = gotowe) */
+        const bestScore = active ? sr.confidence : (top ? top.score : 0);
+        const ready = Math.round(Math.min(100, bestScore / 60 * 100));
+        const rc = readyColor(ready);
+        const L = active ? sr.levels : (top && top.levels ? top.levels : null);
         return (
-          <div className="sigstrip" onClick={() => setShowStrat(true)}
+          <div className="stratstrip" onClick={() => setShowStrat(true)}
             style={{
               cursor: 'pointer',
               borderColor: active ? (sr.dir > 0 ? 'rgba(47,214,174,.45)' : 'rgba(255,107,94,.45)') : 'rgba(199,146,255,.35)',
               background: active ? (sr.dir > 0 ? 'rgba(47,214,174,.07)' : 'rgba(255,107,94,.07)') : 'rgba(199,146,255,.05)',
             }}>
-            <span className="sig-dir" style={{color: dcol}}>
-              🏛 {active ? (sr.dir > 0 ? 'KUP' : 'SPRZEDAJ') : 'CZEKAJ'}
-            </span>
-            <span className="sgauge">
-              <i style={{width: (sr.scores.confidence || 0) + '%', background: active ? dcol : '#c792ff'}} />
-            </span>
-            <span className="sig-meta mono" style={{color:'var(--dim)'}}>
-              {active
-                ? sr.best.name.slice(0, 26) + ' · ' + sr.confidence + '%'
-                : (top ? 'najlepsza: ' + top.name.slice(0, 22) + ' ' + top.score + '% < 60%' : 'brak setupu na tej świecy')}
-              <br/>
-              {active
-                ? 'E ' + fmtPrice(sr.levels.entry) + ' · SL ' + fmtPrice(sr.levels.sl) + ' · TP1 ' + fmtPrice(sr.levels.tp1)
-                : (top && top.levels ? '(war.) E ' + fmtPrice(top.levels.entry) + ' · SL ' + fmtPrice(top.levels.sl) + ' · TP1 ' + fmtPrice(top.levels.tp1) : 'ranking strategii — tapnij')}
-            </span>
-            {sr.mtf && sr.mtf.frames.length > 0 && !canOpen && (
-              <span className="mono" style={{fontSize:10, fontWeight:800, padding:'2px 6px', borderRadius:6, whiteSpace:'nowrap',
-                color:'#c792ff', background:'rgba(199,146,255,.12)', border:'1px solid rgba(199,146,255,.3)'}}>
-                MTF {sr.mtf.align > 0.15 ? '▲' : sr.mtf.align < -0.15 ? '▼' : '•'}
+            {/* wiersz 1: kierunek + nazwa strategii + (przycisk KUP/SPRZEDAJ albo MTF) */}
+            <div style={{display:'flex', alignItems:'center', gap:9}}>
+              <span style={{fontWeight:900, fontSize:14.5, letterSpacing:.3, color: dcol, flexShrink:0}}>
+                🏛 {active ? (sr.dir > 0 ? 'KUP' : 'SPRZEDAJ') : 'CZEKAJ'}
               </span>
-            )}
-            {canOpen && (
-              /* setup GOTOWY → wejście jednym tapnięciem wprost z paska
-                 (przez portfolioCheck/risk jak każde otwarcie; zasila uczenie) */
-              <button className="chip mono" onClick={(ev) => {
-                  ev.stopPropagation();
-                  const L = sr.levels;
-                  if(tryOpenPaper(sr.dir, L.entry, L.sl, L.tp1, L.tp2, 'strategy:' + sr.best.id, sr.confidence, null, signal, { strategy: sr.best.id })){
-                    Bus.show('▶ ' + (sr.dir > 0 ? 'KUP' : 'SPRZEDAJ') + ' (paper): ' + sr.best.name + ' @ ' + fmtPrice(L.entry));
-                  }
-                }}
-                style={{padding:'8px 12px', fontSize:12.5, fontWeight:900, whiteSpace:'nowrap', flexShrink:0,
-                  color: sr.dir > 0 ? '#051b21' : '#fff',
-                  background: sr.dir > 0 ? '#2fd6ae' : '#ff6b5e',
-                  border: 'none', borderRadius: 9}}>
-                ▶ {sr.dir > 0 ? 'KUP' : 'SPRZEDAJ'}
-              </button>
+              <span className="mono" style={{flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:11.5, color:'var(--dim)'}}>
+                {active ? sr.best.name : (top ? top.name : 'brak setupu na tej świecy')}
+                {(active || top) ? ' · ' + bestScore + '%' : ''}
+              </span>
+              {sr.mtf && sr.mtf.frames.length > 0 && (
+                <span className="mono" style={{fontSize:10, fontWeight:800, padding:'2px 6px', borderRadius:6, whiteSpace:'nowrap', flexShrink:0,
+                  color:'#c792ff', background:'rgba(199,146,255,.12)', border:'1px solid rgba(199,146,255,.3)'}}>
+                  MTF {sr.mtf.align > 0.15 ? '▲' : sr.mtf.align < -0.15 ? '▼' : '•'}
+                </span>
+              )}
+              {canOpen && (
+                <button className="stratbtn" onClick={(ev) => {
+                    ev.stopPropagation();
+                    const lv = sr.levels;
+                    if(tryOpenPaper(sr.dir, lv.entry, lv.sl, lv.tp1, lv.tp2, 'strategy:' + sr.best.id, sr.confidence, null, signal, { strategy: sr.best.id })){
+                      Bus.show('▶ ' + (sr.dir > 0 ? 'KUP' : 'SPRZEDAJ') + ' (paper): ' + sr.best.name + ' @ ' + fmtPrice(lv.entry));
+                    }
+                  }}
+                  style={{color: sr.dir > 0 ? '#051b21' : '#fff', background: sr.dir > 0 ? '#2fd6ae' : '#ff6b5e'}}>
+                  ▶ {sr.dir > 0 ? 'KUP' : 'SPRZEDAJ'}
+                </button>
+              )}
+            </div>
+            {/* wiersz 2: pasek GOTOWOŚCI + procent */}
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              <span className="readybar"><i style={{width: ready + '%', background: rc}} /></span>
+              <span className="mono" style={{fontSize:10, fontWeight:800, color: rc, flexShrink:0, minWidth:64, textAlign:'right'}}>
+                {ready >= 100 ? 'GOTOWE' : 'gotowość ' + ready + '%'}
+              </span>
+            </div>
+            {/* wiersz 3: poziomy */}
+            {L && (
+              <div className="mono" style={{fontSize:10.5, color:'var(--dim2)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+                {(active ? '' : '(warunkowo) ')}E {fmtPrice(L.entry)} · SL {fmtPrice(L.sl)} · TP1 {fmtPrice(L.tp1)} · TP2 {fmtPrice(L.tp2)}
+              </div>
             )}
           </div>
         );

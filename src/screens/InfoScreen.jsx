@@ -125,15 +125,25 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
         </div>
       </div>
 
+      {(() => { const locked = prefs.tuneLock !== false; return (
       <div className="card">
-        <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:4}}>
+        <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:4, flexWrap:'wrap'}}>
           <h3 style={{margin:0}}>Strojenie SMC (progi silnika)</h3>
           <span className="spacer" style={{flex:1}} />
-          <button className="chip mono" style={{fontSize:11, padding:'5px 9px', color:'var(--accent)', borderColor:'rgba(255,138,117,.4)'}}
+          <button className="chip mono" style={{fontSize:11, padding:'5px 9px',
+            color: locked ? 'var(--ema9)' : 'var(--up)',
+            borderColor: locked ? 'rgba(255,201,77,.45)' : 'rgba(47,214,174,.45)',
+            background: locked ? 'rgba(255,201,77,.08)' : 'rgba(47,214,174,.08)'}}
             onClick={() => {
+              setPrefs(p => ({ ...p, tuneLock: !locked }));
+              Bus.show(locked ? '🔓 Suwaki odblokowane — możesz zmieniać progi' : '🔒 Suwaki zablokowane — chronione przed przypadkową zmianą');
+            }}>{locked ? '🔒 Zablokowane' : '🔓 Odblokowane'}</button>
+          <button className="chip mono" style={{fontSize:11, padding:'5px 9px', color:'var(--accent)', borderColor:'rgba(255,138,117,.4)', opacity: locked ? 0.45 : 1}}
+            onClick={() => {
+              if(locked){ Bus.show('🔒 Najpierw odblokuj suwaki'); return; }
               setPrefs(p => ({ ...p, smc:{ ...DEFAULT_SMC } }));
               Bus.show('↺ Progi SMC przywrócone do wartości domyślnych');
-            }}>↺ Reset do domyślnych</button>
+            }}>↺ Reset</button>
         </div>
         <div style={{fontSize:12, color:'var(--dim)', lineHeight:1.6, marginBottom:6}}>
           Domyślne wartości są rozsądnym startem — dostrój je własnym backtestem na realnych
@@ -146,6 +156,7 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
         {(() => {
           const smc = prefs.smc || DEFAULT_SMC;
           const setSmc = (k, v) => {
+            if(locked) return; // suwaki zablokowane
             /* [E2-5] log zmian parametrów toru decyzyjnego (fundament E4-3) */
             logParamChange('smc.' + k, (prefs.smc || DEFAULT_SMC)[k], v);
             setPrefs(p => ({ ...p, smc:{ ...DEFAULT_SMC, ...(p.smc||{}), [k]:v } }));
@@ -173,7 +184,8 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
                   </b>
                 </div>
                 <input type="range" min={min} max={max} step={step} value={val}
-                  style={{width:'100%', accentColor: isDef ? 'var(--dim)' : 'var(--cyan)'}}
+                  disabled={locked}
+                  style={{width:'100%', accentColor: isDef ? 'var(--dim)' : 'var(--cyan)', opacity: locked ? 0.5 : 1, cursor: locked ? 'not-allowed' : 'pointer'}}
                   onChange={e => setSmc(k, parseFloat(e.target.value))} />
                 <div style={{fontSize:10.5, color:'var(--dim2)', lineHeight:1.4}}>{hint}</div>
               </div>
@@ -181,6 +193,7 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
           });
         })()}
       </div>
+      ); })()}
 
       <div className="card" style={{borderColor:'rgba(255,138,117,.35)'}}>
         <h3 style={{color:'var(--accent)'}}>Kopia zapasowa (klucze API + ustawienia)</h3>

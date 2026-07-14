@@ -122,10 +122,26 @@
     text-align:left; flex-shrink:0; transition:transform .1s ease;
   }
   .sigstrip:active{transform:scale(.985)}
-  .sig-dir{font-weight:900; font-size:15px; letter-spacing:.5px; min-width:66px}
-  .sgauge{flex:1; height:7px; border-radius:4px; background:rgba(159,226,214,.10); overflow:hidden; position:relative}
-  .sgauge i{position:absolute; top:0; bottom:0; left:0; border-radius:4px}
-  .sig-meta{font-size:10.5px; text-align:right; line-height:1.5; white-space:nowrap}
+  .sig-dir{font-weight:900; font-size:15px; letter-spacing:.5px; min-width:66px; flex-shrink:0}
+  .sgauge{flex:1; height:7px; border-radius:4px; background:rgba(159,226,214,.10); overflow:hidden; position:relative; min-width:0}
+  .sgauge i{position:absolute; top:0; bottom:0; left:0; border-radius:4px; transition:width .3s ease}
+  .sig-meta{font-size:10.5px; text-align:right; line-height:1.5; white-space:nowrap; min-width:0; overflow:hidden; text-overflow:ellipsis}
+
+  /* ---------- pasek gotowości setupu (readiness) ---------- */
+  .readybar{height:6px; border-radius:4px; background:rgba(159,226,214,.10); overflow:hidden; position:relative; flex:1; min-width:0}
+  .readybar i{position:absolute; top:0; bottom:0; left:0; border-radius:4px; transition:width .35s ease, background .35s ease}
+  /* ---------- pasek strategii (🏛 ranking) — układ kolumnowy, bez ucięć ---------- */
+  .stratstrip{
+    margin:6px 16px 2px; padding:9px 12px; border-radius:13px; width:calc(100% - 32px);
+    display:flex; flex-direction:column; gap:7px; flex-shrink:0;
+    border:1px solid var(--border2); background:var(--panel); text-align:left;
+    transition:transform .1s ease;
+  }
+  .stratstrip:active{transform:scale(.99)}
+  .stratbtn{
+    padding:9px 14px; border-radius:10px; border:none; font-weight:900; font-size:13px;
+    white-space:nowrap; flex-shrink:0; letter-spacing:.3px; cursor:pointer;
+  }
 
   /* ---------- modal ---------- */
   .modal-bg{position:fixed;inset:0;background:rgba(2,12,15,.78);z-index:50;display:flex;align-items:flex-end;justify-content:center;backdrop-filter:blur(3px)}
