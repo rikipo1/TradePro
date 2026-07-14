@@ -580,7 +580,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const priceColor = pct == null ? 'var(--text)' : up ? 'var(--up)' : 'var(--down)';
 
   return (
-    <div className="screen" style={{overflow:'hidden'}}>
+    <div className="screen" style={{overflowY:'auto', overflowX:'hidden'}}>
       <div className="topbar" style={{paddingBottom:4}}>
         <button className="iconbtn" onClick={onBack}><Ic d={IC.back} size={20} /></button>
         <div style={{minWidth:0}}>
