@@ -85,38 +85,36 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
     try{ cvsRef.current.setPointerCapture(e.pointerId); }catch(err){}
     g.pts.set(e.pointerId, { x:e.clientX, y:e.clientY });
     if(g.pts.size === 1){
-      g.mode = 'pan'; g.sx = e.clientX; g.sEnd = view.end;
-      g.sy = e.clientY; g.moved = false; g.t0 = Date.now();
-      /* start okna CENY do pan pionowego (z ostatniego rysowania) */
       const L = layoutRef.current;
-      g.yEngaged = (view.yLo != null && view.yHi != null);
-      if(L){
+      const rect = cvsRef.current ? cvsRef.current.getBoundingClientRect() : { left:0 };
+      const localX = e.clientX - rect.left;
+      const onPriceAxis = L && localX >= (L.plotL + L.plotW) - 6; // pasek ceny (prawa oś)
+      if(onPriceAxis){
+        /* ZOOM CENY na pasku ceny — nie miesza się ze zwykłym zoomem (pinch) */
+        g.mode = 'yzoom'; g.sy = e.clientY; g.moved = false; g.t0 = Date.now();
         g.syLo = view.yLo != null ? view.yLo : L.lo;
         g.syHi = view.yHi != null ? view.yHi : L.hi;
         g.syRange = (g.syHi - g.syLo) || L.range || 1;
-        g.syPriceH = L.priceH || 1;
+        g.syMid = (g.syLo + g.syHi) / 2;
+      } else {
+        g.mode = 'pan'; g.sx = e.clientX; g.sEnd = view.end;
+        g.sy = e.clientY; g.moved = false; g.t0 = Date.now();
+        /* start okna CENY do pan pionowego (z ostatniego rysowania) */
+        g.yEngaged = (view.yLo != null && view.yHi != null);
+        if(L){
+          g.syLo = view.yLo != null ? view.yLo : L.lo;
+          g.syHi = view.yHi != null ? view.yHi : L.hi;
+          g.syRange = (g.syHi - g.syLo) || L.range || 1;
+          g.syPriceH = L.priceH || 1;
+        }
       }
     } else if(g.pts.size === 2){
       const p = Array.from(g.pts.values());
       g.mode = 'pinch';
-      /* rozdzielny rozstaw poziomy (czas) i pionowy (cena) — zoom dwuosiowy */
-      g.sDistX = Math.max(12, Math.abs(p[0].x - p[1].x));
-      g.sDistY = Math.max(12, Math.abs(p[0].y - p[1].y));
+      /* pinch = ZWYKŁY ZOOM (czas). Oś ceny zoomuje się osobno na pasku ceny. */
+      g.sDistX = Math.max(12, Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y));
       g.sCount = view.count;
       g.sCenter = view.end - view.count/2;
-      /* baza okna CENY do zoomu pionowego (z ostatniego rysowania) */
-      const L = layoutRef.current;
-      if(L){
-        g.sYLo = view.yLo != null ? view.yLo : L.lo;
-        g.sYHi = view.yHi != null ? view.yHi : L.hi;
-        g.sYRange = (g.sYHi - g.sYLo) || L.range || 1;
-        const cvs = cvsRef.current;
-        const rect = cvs ? cvs.getBoundingClientRect() : { top:0 };
-        const cyLocal = (p[0].y + p[1].y)/2 - rect.top;          // środek pionowy pinch
-        g.sYCenter = L.hi - (cyLocal - L.priceTop) / (L.priceH || 1) * L.range;
-        if(!isFinite(g.sYCenter)) g.sYCenter = (g.sYLo + g.sYHi)/2;
-        g.sYFrac = (g.sYCenter - g.sYLo) / g.sYRange;            // pozycja kotwicy w oknie
-      }
     }
   };
   const onPointerMove = (e) => {
@@ -149,30 +147,25 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
         yPatch = { yLo: g.syLo + dp, yHi: g.syHi + dp };
       }
       scheduleView(v => ({ ...v, end:newEnd, ...(yPatch || {}) }));
+    } else if(g.mode === 'yzoom' && g.pts.size === 1){
+      /* ZOOM OSI CENY (przeciąganie po pasku ceny): w dół = oddal (większy
+         zakres), w górę = przybliż (mniejszy zakres). Środek okna nieruchomy. */
+      const dy = e.clientY - g.sy;
+      if(Math.abs(dy) > 3) g.moved = true;
+      let factor = Math.exp(dy / 160);
+      factor = Math.max(0.15, Math.min(8, factor));
+      const newRange = g.syRange * factor;
+      const newLo = g.syMid - newRange / 2, newHi = g.syMid + newRange / 2;
+      if(isFinite(newLo) && newHi > newLo) scheduleView(v => ({ ...v, yLo:newLo, yHi:newHi }));
     } else if(g.mode === 'pinch' && g.pts.size >= 2){
       const p = Array.from(g.pts.values());
-      const dX = Math.max(12, Math.abs(p[0].x - p[1].x));
-      const dY = Math.max(12, Math.abs(p[0].y - p[1].y));
-      /* CZAS: rozstaw poziomy */
-      let nc = Math.round(g.sCount * (g.sDistX / dX));
+      const d = Math.max(12, Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y));
+      /* zwykły zoom (czas) */
+      let nc = Math.round(g.sCount * (g.sDistX / d));
       nc = Math.max(15, Math.min(400, nc));
       const ne = clampEnd(g.sCenter + nc/2, nc, len);
       pinnedRef.current = ne >= len - 1.5;
-      /* CENA: rozstaw pionowy — zoom osi ceny wokół kotwicy (środka pinch);
-         angażuje ręczne okno tylko przy realnej zmianie pionowej (>8%), żeby
-         czysto poziomy pinch nie zamrażał auto-skali */
-      let yPatch = null;
-      if(g.sYRange){
-        let scale = g.sDistY / dY;                 // palce w pionie dalej → mniejszy zakres (zoom in)
-        scale = Math.max(0.2, Math.min(5, scale));
-        if(Math.abs(scale - 1) > 0.08){
-          const newRange = g.sYRange * scale;
-          const newLo = g.sYCenter - g.sYFrac * newRange;
-          const newHi = newLo + newRange;
-          if(isFinite(newLo) && isFinite(newHi) && newHi > newLo) yPatch = { yLo:newLo, yHi:newHi };
-        }
-      }
-      scheduleView(v => ({ ...v, count:nc, end:ne, ...(yPatch || {}) }));
+      scheduleView(v => ({ ...v, count:nc, end:ne }));
     }
   };
   const onPointerUp = (e) => {
@@ -332,6 +325,13 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
       ctx.fillStyle = CLR.axis;
       ctx.fillText(v.toFixed(dec), plotR + 7, y);
     }
+    /* wskazówka: pasek ceny można chwycić i skalować (⇕) */
+    ctx.fillStyle = view.yLo != null ? 'rgba(199,146,255,.8)' : 'rgba(143,176,172,.4)';
+    ctx.font = '11px JetBrains Mono, monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText('⇕', plotR + (axisW / 2), priceTop + 2);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.font = '10px JetBrains Mono, monospace';
 
     /* siatka pionowa + etykiety czasu */
     const tStep = Math.max(1, Math.round(count / 5));
