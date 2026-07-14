@@ -854,7 +854,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
         </div>
       )}
 
-      <div style={{flex:1, display:'flex', flexDirection:'column', position:'relative', minHeight:280}}>
+      <div style={{flex:1, display:'flex', flexDirection:'column', position:'relative', minHeight:160}}>
         <ChartCanvas
           key={item.sym + '|' + tf.id}
           candles={candlesSafe}
