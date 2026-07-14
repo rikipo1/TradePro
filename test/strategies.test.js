@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { buildStrategyCtx, rankStrategies } from '../src/strategies/engine.js';
 import { strategyStatsFromJournal, learnAdjust, MIN_N } from '../src/strategies/learning.js';
 import { aggregateTf, mtfConsensus } from '../src/strategies/mtf.js';
-import { detBreakout, detMeanReversion, detWyckoffSpring } from '../src/strategies/detectors.js';
+import { detBreakout, detMeanReversion, detWyckoffSpring, detChartPattern } from '../src/strategies/detectors.js';
 import { mulberry32, packFor } from './_synth.js';
 
 function trendCandles(n, seed = 11, t0 = 1700000000) {
@@ -110,6 +110,22 @@ test('[STRAT] Wyckoff spring: nurek pod range i powrót ⇒ LONG', () => {
     const r = detWyckoffSpring(ctx);
     assert.ok(r && r.dir === 1, 'spring wykryty');
   } // gdy klasyfikator nie widzi range na tak krótkiej serii — detektor słusznie milczy
+});
+
+test('[STRAT] detektor figur: czyta ctx.geo i zwraca kierunek wybicia', () => {
+  // sztuczny ctx z jedną świeżą figurą
+  const ctx = { i: 100, geo: [
+    { i: 98, dir: 1, conf: 82, name: 'Podwójne dno', span: 30 },
+    { i: 40, dir: -1, conf: 90, name: 'Głowa i ramiona (RGR)', span: 50 }, // za stara (i<i-10)
+  ] };
+  const r = detChartPattern(ctx);
+  assert.ok(r && r.dir === 1, 'wybrana świeża figura LONG');
+  assert.match(r.name, /Podwójne dno/);
+  assert.ok(r.base > 0 && r.base <= 82);
+  // brak figur ⇒ null
+  assert.equal(detChartPattern({ i: 100, geo: [] }), null);
+  // tylko stare figury ⇒ null
+  assert.equal(detChartPattern({ i: 100, geo: [{ i: 10, dir: 1, conf: 90, name: 'X' }] }), null);
 });
 
 test('[STRAT] werdykt LONG/SHORT ma zawsze poziomy i wyjaśnienie odrzuconych', () => {

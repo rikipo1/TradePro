@@ -19,7 +19,7 @@ import { classifyRegime } from '../signals/regime.js';
 import { liquidityModel } from '../signals/liquidity.js';
 import { volumeProfile } from '../signals/volumeProfile.js';
 import { smcAnalyze, relativeVolume } from '../smc/index.js';
-import { zigzag } from '../patterns/index.js';
+import { zigzag, detectGeoPatterns } from '../patterns/index.js';
 import { sessionInfo, macroWindow } from '../utils/sessions.js';
 import { instrProfile, spreadPx } from '../constants/instruments.js';
 import { mtfConsensus } from './mtf.js';
@@ -72,7 +72,11 @@ export function buildStrategyCtx(candles, ind, emaData, hasVol, sym, tfSec, atId
     }
     if (close != null && isFinite(h)) prevDay = { h, l, c: close };
   }
-  return { candles, i, price, atr, ind, emaData, smc, liq, vp, regime, sess, macro, relVol, hasVol, piv, prevDay, sym, tfSec };
+  /* figury geometryczne (RGR, podwójne dno/szczyt, trójkąty, kliny, flagi…)
+     — wykrywane z pivotów; zero lookahead (świece do i) */
+  let geo = [];
+  try { geo = detectGeoPatterns(candles.slice(0, i + 1), piv, atr) || []; } catch (e) { geo = []; }
+  return { candles, i, price, atr, ind, emaData, smc, liq, vp, regime, sess, macro, relVol, hasVol, piv, prevDay, geo, sym, tfSec };
 }
 
 /* poziomy dla wybranej strategii: SL za strukturą/ekstremum, TP1–TP4 */

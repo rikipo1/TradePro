@@ -304,14 +304,18 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.minProb, prefs.waitPullback, prefs.smc, item.sym, wv]);
   /* 🏛 Instytucjonalny ranking strategii — moduł DORADCZY obok zwalidowanego
      silnika (auto-trade nadal decyduje computeSignal; parytet validate↔serve).
-     Przeliczany z każdą świecą/tickiem jak signal. */
+     THROTTLE: detektory pracują na ZAMKNIĘTEJ świecy (n-2), więc przeliczamy
+     ranking tylko przy NOWEJ świecy (barSig) i zmianie dziennika — nie na
+     każdym ticku ceny. To eliminuje zbędne obciążenie CPU przy streamie. */
+  const barSig = candlesSafe.length ? candlesSafe.length + ':' + candlesSafe[candlesSafe.length-1].t : '0';
   const stratRank = useMemo(() => {
     if(!ind || candlesSafe.length < 60) return null;
     try{
       const ctx = buildStrategyCtx(candlesSafe, ind, emaData, hasVol, item.sym, TF_SEC[tf.id] || 300, null);
       return ctx ? rankStrategies(ctx, journal) : null;
     }catch(e){ return null; }
-  }, [ind, candlesSafe, emaData, hasVol, item.sym, tf.id, journal]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barSig, item.sym, tf.id, journal, wv]);
 
   /* najlepsza „okazja" poza samym aktywnym sygnałem (do paska i alertu) */
   const topOpp = useMemo(() => {

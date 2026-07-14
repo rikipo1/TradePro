@@ -323,8 +323,33 @@ export function detPivots(ctx) {
   return null;
 }
 
+/* 15) FIGURY GEOMETRYCZNE — RGR, podwójne/potrójne dno·szczyt, trójkąty,
+   kliny, flagi, kanały (z modułu patterns). Bierze najświeższą figurę
+   blisko bieżącej świecy o sensownej pewności. */
+export function detChartPattern(ctx) {
+  const geo = ctx.geo;
+  if (!geo || !geo.length) return null;
+  let best = null;
+  for (const g of geo) {
+    if (!g || g.dir === 0 || g.conf < 58) continue;
+    if (g.i < ctx.i - 10) continue;                     // tylko świeża figura (≤10 świec)
+    if (!best || g.conf > best.conf || (g.conf === best.conf && g.i > best.i)) best = g;
+  }
+  if (!best) return null;
+  const base = clamp(44 + Math.round((best.conf - 58) * 0.55), 0, 82); // conf 58→44, 100→67
+  return {
+    id: 'chartPattern', name: 'Figura: ' + best.name, group: 'pattern',
+    dir: best.dir, base,
+    why: ['formacja geometryczna „' + best.name + '" (pewność ' + best.conf + '%'
+      + (best.span ? ', ' + best.span + ' świec' : '') + ') — kierunek wybicia ' + (best.dir > 0 ? 'w górę' : 'w dół')],
+    invalidates: ['wybicie linii formacji w przeciwną stronę', 'zamknięcie poza kształtem figury'],
+    conditions: ['potwierdzenie wybicia (zamknięcie za linią)', 'wolumen rosnący na wybiciu'],
+  };
+}
+
 export const ALL_DETECTORS = [
   detTrendFollowing, detMomentum, detBreakout, detBreakRetest,
   detLiquiditySweep, detWyckoffSpring, detMeanReversion, detOrderBlock,
   detFvg, detPremiumDiscount, detVwap, detSqueeze, detSessionDrive, detPivots,
+  detChartPattern,
 ];
