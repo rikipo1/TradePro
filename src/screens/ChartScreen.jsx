@@ -40,6 +40,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const [aiState, setAiState] = useState({ busy:false, res:null, err:null, at:null, provider:null });
   const [showBt, setShowBt] = useState(false);
   const [showStrat, setShowStrat] = useState(false); // 🏛 ranking strategii
+  const [fs, setFs] = useState(false);               // pełny ekran wykresu
   const [expStrat, setExpStrat] = useState(null);     // rozwinięty wiersz rankingu
   const [ticket, setTicket] = useState(null);
   const [bt, setBt] = useState({ busy:false, res:null });
@@ -612,6 +613,9 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
         </button>
         <button className="iconbtn" onClick={() => { Net.blockedUntil = 0; load(); }}>
           <span className={loading ? 'spin' : ''} style={{display:'flex'}}><Ic d={IC.refresh} size={18} /></span>
+        </button>
+        <button className="iconbtn" title="Pełny ekran wykresu" onClick={() => setFs(true)}>
+          <span style={{fontSize:17, lineHeight:1}}>⛶</span>
         </button>
       </div>
 
@@ -1639,6 +1643,90 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== PEŁNY EKRAN WYKRESU ===================== */}
+      {fs && (
+        <div style={{position:'fixed', inset:0, zIndex:200, background:'var(--bg)', display:'flex', flexDirection:'column'}}>
+          {/* pasek górny: symbol · TF · cena · wyjście */}
+          <div style={{display:'flex', alignItems:'center', gap:8, padding:'calc(env(safe-area-inset-top,0px) + 8px) 12px 6px', flexShrink:0}}>
+            <b style={{fontSize:14}}>{item.sym}</b>
+            <span className="mono" style={{fontSize:12, color:priceColor, fontWeight:800}}>{fmtPrice(data.price)}</span>
+            {pct != null && <span className="mono" style={{fontSize:11, color:priceColor}}>{fmtPct(pct)}</span>}
+            {data.live && <span style={{color:'var(--up)', fontSize:10, fontWeight:800}}>● LIVE</span>}
+            <span style={{flex:1}} />
+            <button className="iconbtn" onClick={() => { Net.blockedUntil = 0; load(); }}>
+              <span className={loading ? 'spin' : ''} style={{display:'flex'}}><Ic d={IC.refresh} size={17} /></span>
+            </button>
+            <button className="iconbtn" title="Wyjdź z pełnego ekranu" onClick={() => setFs(false)}>
+              <span style={{fontSize:16, lineHeight:1}}>✕</span>
+            </button>
+          </div>
+          {/* TF chips (kompaktowo) */}
+          <div className="chiprow" style={{paddingTop:0, paddingBottom:2, flexShrink:0}}>
+            {TFS.map(t => (
+              <button key={t.id} className={'chip mono' + (t.id === tf.id ? ' sel' : '')}
+                onClick={() => setPrefs(p => ({ ...p, tf:t.id }))}>{t.label}</button>
+            ))}
+          </div>
+          {/* wykres wypełnia resztę */}
+          <div style={{flex:1, position:'relative', minHeight:0}}>
+            <ChartCanvas
+              key={'fs|' + item.sym + '|' + tf.id}
+              candles={candlesSafe}
+              emaData={emaData}
+              emaVis={prefs.emaVis}
+              tfId={tf.id}
+              hasVol={hasVol}
+              overlays={overlays}
+              panels={panels}
+              markers={iprefs.form ? patterns.markers : null}
+              geoLines={iprefs.form ? patterns.geoDraw : null}
+              patMap={patterns.patMap}
+              focus={focus}
+              levels={sigLevels}
+              posMarkers={posMarkers}
+              resetKey={'fs|' + item.sym + '|' + tf.id}
+            />
+            {/* NAŁOŻONY panel sygnałów — żeby było widać werdykt w pełnym ekranie */}
+            <div style={{position:'absolute', top:8, left:8, display:'flex', flexDirection:'column', gap:6, maxWidth:'70%', pointerEvents:'none'}}>
+              {signal && (
+                <div onClick={() => setShowSig(true)} style={{pointerEvents:'auto', cursor:'pointer',
+                  display:'inline-flex', alignItems:'center', gap:8, padding:'6px 10px', borderRadius:10, alignSelf:'flex-start',
+                  background:'rgba(4,24,29,.82)', border:'1px solid ' + (signal.dir > 0 ? 'rgba(47,214,174,.5)' : signal.dir < 0 ? 'rgba(255,107,94,.5)' : 'var(--border2)')}}>
+                  <b style={{fontSize:13, color: signal.dir > 0 ? '#2fd6ae' : signal.dir < 0 ? '#ff6b5e' : '#8fb0ac'}}>
+                    {signal.dir > 0 ? 'LONG' : signal.dir < 0 ? 'SHORT' : 'CZEKAJ'}{signal.strong ? ' ★' : ''}
+                  </b>
+                  {signal.setupScore != null && <span className="mono" style={{fontSize:11, color:'var(--dim)'}}>P {signal.setupScore}%{signal.ev != null ? ' · EV ' + (signal.ev>0?'+':'') + signal.ev + 'R' : ''}</span>}
+                </div>
+              )}
+              {stratRank && (() => {
+                const sr = stratRank;
+                const active = sr.dir !== 0 && sr.levels;
+                const dcol = sr.dir > 0 ? '#2fd6ae' : sr.dir < 0 ? '#ff6b5e' : '#c792ff';
+                return (
+                  <div onClick={() => setShowStrat(true)} style={{pointerEvents:'auto', cursor:'pointer',
+                    display:'inline-flex', alignItems:'center', gap:8, padding:'6px 10px', borderRadius:10, alignSelf:'flex-start',
+                    background:'rgba(4,24,29,.82)', border:'1px solid rgba(199,146,255,.4)'}}>
+                    <b style={{fontSize:12.5, color:dcol}}>🏛 {active ? (sr.dir > 0 ? 'KUP' : 'SPRZEDAJ') : 'CZEKAJ'}</b>
+                    <span className="mono" style={{fontSize:10.5, color:'var(--dim)', maxWidth:130, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+                      {sr.best ? sr.best.name : (sr.ranking[0] ? sr.ranking[0].name : '—')}{sr.confidence ? ' ' + sr.confidence + '%' : ''}
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+            {/* przyciski KUP/SPRZEDAJ paper w pełnym ekranie */}
+            {candlesSafe.length > 0 && (
+              <div style={{position:'absolute', bottom:10, left:10, right:10, display:'flex', gap:8}}>
+                <button className="chip mono" style={{flex:1, justifyContent:'center', padding:'11px 0', fontWeight:800, color:'var(--up)', borderColor:'rgba(47,214,174,.5)', background:'rgba(4,24,29,.82)'}}
+                  onClick={() => openTicket(1)}>▲ KUP</button>
+                <button className="chip mono" style={{flex:1, justifyContent:'center', padding:'11px 0', fontWeight:800, color:'var(--down)', borderColor:'rgba(255,107,94,.5)', background:'rgba(4,24,29,.82)'}}
+                  onClick={() => openTicket(-1)}>▼ SPRZEDAJ</button>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -144,7 +144,7 @@
   }
 
   /* ---------- modal ---------- */
-  .modal-bg{position:fixed;inset:0;background:rgba(2,12,15,.78);z-index:50;display:flex;align-items:flex-end;justify-content:center;backdrop-filter:blur(3px)}
+  .modal-bg{position:fixed;inset:0;background:rgba(2,12,15,.78);z-index:300;display:flex;align-items:flex-end;justify-content:center;backdrop-filter:blur(3px)}
   .modal{
     width:100%;max-width:560px;max-height:82vh;display:flex;flex-direction:column;
     background:var(--panel);border:1px solid var(--border2);border-bottom:none;
@@ -187,7 +187,7 @@
 
   .toast{
     position:fixed;left:50%;transform:translateX(-50%);
-    bottom:calc(env(safe-area-inset-bottom,0px) + 76px);z-index:99;
+    bottom:calc(env(safe-area-inset-bottom,0px) + 76px);z-index:250;
     background:var(--panel3);border:1px solid var(--border2);color:var(--text);
     padding:10px 16px;border-radius:12px;font-size:13px;font-weight:600;
     max-width:88%;animation:fadeUp .2s ease;box-shadow:0 6px 24px rgba(0,0,0,.4);
