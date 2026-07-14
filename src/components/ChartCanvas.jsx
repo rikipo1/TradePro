@@ -21,7 +21,9 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
   }, []);
   useEffect(() => () => { if(rafRef.current.id) cancelAnimationFrame(rafRef.current.id); }, []);
   const [size, setSize] = useState({ w:0, h:0 });
-  const [view, setView] = useState({ count:COUNT0, end:COUNT0-1 });
+  /* view: count/end = okno CZASU; yLo/yHi = ręczne okno CENY (null = auto-fit).
+     Ręczne okno pozwala przesuwać wykres w GÓRĘ/DÓŁ (pan pionowy). */
+  const [view, setView] = useState({ count:COUNT0, end:COUNT0-1, yLo:null, yHi:null });
   const [cross, setCross] = useState(null);
   const len = candles.length;
   const ovl = overlays || {};
@@ -31,7 +33,7 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
   useEffect(() => {
     pinnedRef.current = true;
     setCross(null);
-    setView({ count:COUNT0, end:COUNT0-1 });
+    setView({ count:COUNT0, end:COUNT0-1, yLo:null, yHi:null });
   }, [resetKey]);
 
   /* --- fokus z listy formacji: ustaw krzyżyk i dosuń widok --- */
@@ -84,7 +86,16 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
     g.pts.set(e.pointerId, { x:e.clientX, y:e.clientY });
     if(g.pts.size === 1){
       g.mode = 'pan'; g.sx = e.clientX; g.sEnd = view.end;
-      g.moved = false; g.t0 = Date.now();
+      g.sy = e.clientY; g.moved = false; g.t0 = Date.now();
+      /* start okna CENY do pan pionowego (z ostatniego rysowania) */
+      const L = layoutRef.current;
+      g.yEngaged = (view.yLo != null && view.yHi != null);
+      if(L){
+        g.syLo = view.yLo != null ? view.yLo : L.lo;
+        g.syHi = view.yHi != null ? view.yHi : L.hi;
+        g.syRange = (g.syHi - g.syLo) || L.range || 1;
+        g.syPriceH = L.priceH || 1;
+      }
     } else if(g.pts.size === 2){
       const p = Array.from(g.pts.values());
       g.mode = 'pinch';
@@ -104,10 +115,25 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
     if(!L || !len) return;
     if(g.mode === 'pan' && g.pts.size === 1){
       const dx = e.clientX - g.sx;
-      if(Math.abs(dx) > 5) g.moved = true;
+      const dy = e.clientY - g.sy;
+      if(Math.abs(dx) > 5 || Math.abs(dy) > 5) g.moved = true;
       const newEnd = clampEnd(g.sEnd - dx / L.cw, view.count, len);
       pinnedRef.current = newEnd >= len - 1.5;
-      scheduleView(v => ({ ...v, end:newEnd }));
+      /* pan PIONOWY (cena): włącza się po przekroczeniu progu, żeby czysty
+         ruch poziomy nie zamrażał auto-dopasowania osi */
+      let yPatch = null;
+      if(!g.yEngaged && Math.abs(dy) > 8){
+        g.yEngaged = true; g.sy = e.clientY;
+        g.syLo = view.yLo != null ? view.yLo : L.lo;
+        g.syHi = view.yHi != null ? view.yHi : L.hi;
+        g.syRange = (g.syHi - g.syLo) || L.range || 1;
+        g.syPriceH = L.priceH || 1;
+      }
+      if(g.yEngaged){
+        const dp = (e.clientY - g.sy) / g.syPriceH * g.syRange; // przesuń okno ceny
+        yPatch = { yLo: g.syLo + dp, yHi: g.syHi + dp };
+      }
+      scheduleView(v => ({ ...v, end:newEnd, ...(yPatch || {}) }));
     } else if(g.mode === 'pinch' && g.pts.size >= 2){
       const p = Array.from(g.pts.values());
       const d = Math.max(8, Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y));
@@ -115,7 +141,7 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
       nc = Math.max(15, Math.min(400, nc));
       const ne = clampEnd(g.sCenter + nc/2, nc, len);
       pinnedRef.current = ne >= len - 1.5;
-      scheduleView({ count:nc, end:ne });
+      scheduleView(v => ({ ...v, count:nc, end:ne }));
     }
   };
   const onPointerUp = (e) => {
@@ -129,6 +155,15 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
     if(g.pts.size === 1 && g.mode === 'pinch'){
       const rest = Array.from(g.pts.values())[0];
       g.mode = 'pan'; g.sx = rest.x; g.sEnd = view.end; g.moved = true; g.t0 = 0;
+      /* wznów bazę pan pionowego od bieżącego palca (bez skoku) */
+      g.sy = rest.y;
+      const L = layoutRef.current;
+      if(L){
+        g.syLo = view.yLo != null ? view.yLo : L.lo;
+        g.syHi = view.yHi != null ? view.yHi : L.hi;
+        g.syRange = (g.syHi - g.syLo) || L.range || 1;
+        g.syPriceH = L.priceH || 1;
+      }
     } else if(g.pts.size === 0){
       g.mode = null;
     }
@@ -154,12 +189,12 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
         const cw2 = L.plotW / nc;
         const ne = clampEnd(idxAt + 0.5 - (x - L.plotL)/cw2 + nc - 1, nc, len);
         pinnedRef.current = ne >= len - 1.5;
-        return { count:nc, end:ne };
+        return { ...v, count:nc, end:ne };
       });
     };
     const onDbl = () => {
       pinnedRef.current = true;
-      setView({ count:COUNT0, end: len ? len-1+COUNT0*0.08 : COUNT0-1 });
+      setView({ count:COUNT0, end: len ? len-1+COUNT0*0.08 : COUNT0-1, yLo:null, yHi:null });
     };
     cvs.addEventListener('wheel', onWheel, { passive:false });
     cvs.addEventListener('dblclick', onDbl);
@@ -217,6 +252,10 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
     let pad = (hi - lo) * 0.07;
     if(pad <= 0) pad = Math.max(Math.abs(hi) * 0.002, 0.5);
     lo -= pad; hi += pad;
+    /* ręczne okno CENY (pan pionowy) nadpisuje auto-dopasowanie */
+    if(view.yLo != null && view.yHi != null && view.yHi > view.yLo){
+      lo = view.yLo; hi = view.yHi;
+    }
     const range = hi - lo;
 
     /* osie / layout */
@@ -251,7 +290,7 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
     const X = (i) => plotL + (i - start) * cw + cw/2;
     const Y = (p) => priceTop + (hi - p) / range * priceH;
 
-    layoutRef.current = { start, cw, plotL, plotW };
+    layoutRef.current = { start, cw, plotL, plotW, lo, hi, range, priceH, priceTop };
 
     /* siatka pozioma + etykiety cen */
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
@@ -625,6 +664,10 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
           pinnedRef.current = true;
           setView(v => ({ ...v, end: len - 1 + v.count * 0.08 }));
         }}>⇥ Teraz</button>
+      )}
+      {view.yLo != null && (
+        <button className="resetview mono" style={{bottom: showReset ? 72 : 34}}
+          onClick={() => setView(v => ({ ...v, yLo:null, yHi:null }))}>⇕ auto</button>
       )}
     </div>
   );
