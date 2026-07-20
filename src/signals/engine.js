@@ -1,7 +1,7 @@
 import { spreadPx } from '../constants/instruments.js';
 import { getChart, htfTrend } from '../data/feed.js';
 import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
-import { detectPatterns, zigzag } from '../patterns/index.js';
+import { detectGeoPatterns, detectPatterns, zigzag } from '../patterns/index.js';
 import { displacement, relativeVolume, smcAnalyze } from '../smc/index.js';
 import { sessionInfo } from '../utils/sessions.js';
 import { buildPullbackPlan } from './pullback.js';
@@ -128,18 +128,39 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     else if(price <= bD) add(6, 'Cena przy dolnej wstędze Bollingera w konsolidacji');
   }
 
-  /* 8) formacje z ostatnich 3 świec */
+  /* 8) formacje świecowe z ostatnich 3 świec (geo liczone osobno, przyczynowo) */
   let patScore = 0; const patNames = [];
   for(let q=0;q<patterns.list.length;q++){
     const p = patterns.list[q];
-    if(p.i >= i - 3 && p.i <= i && p.dir !== 0){
-      const w = (p.conf - 50)/50 * (p.kind === 'geo' ? 14 : 10) * p.dir;
+    if(p.i >= i - 3 && p.i <= i && p.dir !== 0 && p.kind !== 'geo'){
+      const w = (p.conf - 50)/50 * 10 * p.dir;
       patScore += w;
       if(Math.abs(w) >= 2) patNames.push((p.dir > 0 ? '▲ ' : '▼ ') + p.name + ' ' + p.conf + '%');
     }
   }
   patScore = Math.max(-18, Math.min(18, patScore));
   if(Math.abs(patScore) >= 2) add(patScore, 'Formacje: ' + patNames.slice(0, 3).join(', '));
+
+  /* 8b) formacje GEOMETRYCZNE — wcześniej martwe: lista z UI liczona była na
+     pełnej historii (indeks za świecą sygnałową), a backtest nie widział ich
+     wcale. Teraz liczymy je TUTAJ z pivotów ≤ i (zero lookahead), więc trójkąty,
+     kliny, kanały, podwójne szczyty/dna, RGR i flagi realnie wchodzą do score —
+     identycznie live i w backteście. */
+  let geoScore = 0; const geoNames = [];
+  try{
+    const geoList = detectGeoPatterns(candles.slice(0, i+1), _piv, atr);
+    for(let q=0;q<geoList.length;q++){
+      const g = geoList[q];
+      /* tylko świeże: formacja domknięta przy bieżącej świecy (pivot-owe, jak
+         podwójny szczyt, mają i = indeks ostatniego pivotu — dopuszczamy 6 świec) */
+      if(g.dir === 0 || g.conf < 58 || g.i < i - 6) continue;
+      const w = (g.conf - 50)/50 * 14 * g.dir;
+      geoScore += w;
+      if(Math.abs(w) >= 2) geoNames.push((g.dir > 0 ? '▲ ' : '▼ ') + g.name + ' ' + g.conf + '%');
+    }
+    geoScore = Math.max(-14, Math.min(14, geoScore));
+    if(Math.abs(geoScore) >= 2) add(geoScore, 'Formacja geometryczna: ' + geoNames.slice(0, 2).join(', '));
+  }catch(e){ geoScore = 0; }
 
   /* 9) kontekst S/R + wybicia */
   const zones = srOverride || (ind.sr || []);
