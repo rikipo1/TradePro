@@ -460,14 +460,18 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       .filter(x => x.paper && x.result === 'open')
       .map(x => ({ sym: x.sym, dir: x.dir, riskPct: x.riskPct != null ? x.riskPct : 0.5 }));
     const volR = (sig && sig.atr && e.risk > 0) ? +(sig.atr / e.risk).toFixed(2) : null;
+    const freeTrade = prefs.freeTrade !== false; // domyślnie WŁĄCZONY — bez twardych blokad portfela
     const pc = portfolioCheck(
       { sym: item.sym, dir, riskPct: e.riskPct != null ? e.riskPct : 0.5, volR },
       open, Store.get('rt_corr_matrix', null));
     if(!pc.allowed){
-      Bus.show('🛑 Portfel: ' + pc.reason + ' — wejście odrzucone');
-      return false;
-    }
-    if(pc.scale < 1){
+      if(!freeTrade){
+        Bus.show('🛑 Portfel: ' + pc.reason + ' — wejście odrzucone');
+        return false;
+      }
+      Bus.show('⚠️ Portfel: ' + pc.reason + ' — otwieram mimo limitu (tryb swobodny)');
+      e.note = ((e.note || '') + (e.note ? ' · ' : '') + '⚠ ' + pc.reason).trim();
+    } else if(pc.scale < 1 && !freeTrade){
       if(e.riskPct != null) e.riskPct = +(e.riskPct * pc.scale).toFixed(2);
       e.note = ((e.note || '') + (e.note ? ' · ' : '') + pc.reason).trim();
     }
@@ -552,7 +556,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       notifyUser('Rikipo Trader — ' + (strong ? 'MOCNY sygnał ' : 'sygnał ') + dtxt, msg);
       Bus.show((strong ? '🔥 ' : '⚡ ') + msg);
     }
-    if(prefs.autoTrade && signal.levels && !journal.some(e => e.paper && e.result === 'open' && e.sym === item.sym)){
+    if(prefs.autoTrade && signal.levels && (prefs.freeTrade !== false || !journal.some(e => e.paper && e.result === 'open' && e.sym === item.sym))){
       /* [E3-3] okno makro = zakaz dla automatu (ręczne wejście z ostrzeżeniem) */
       if(signal.autoTradeBlock){
         Bus.show('⛔ Okno makro: ' + signal.macroWindow + ' — auto-trade zablokowany');
@@ -561,7 +565,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       /* Risk Engine v2 [A5]: floating + limit otwartych + dzienny limit UTC */
       const live = liveRisk ? liveRisk(journal, { [item.sym]: data.price }) : undefined;
       const rs = riskStatus(journal, {}, live);
-      if(rs.blocked){
+      if(rs.blocked && prefs.freeTrade === false){
         Bus.show('🛑 Kill-switch: ' + rs.reason + ' — auto-trade wstrzymany');
       } else {
         if(tryOpenPaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'auto', signal.score, signal.entryQuality, signal)){
@@ -1084,7 +1088,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                     color: signal.dir > 0 ? 'var(--up)' : 'var(--down)',
                     borderColor: signal.dir > 0 ? 'rgba(47,214,174,.5)' : 'rgba(255,107,94,.5)'}}
                   onClick={() => {
-                    if(journal.some(e => e.paper && e.result === 'open' && e.sym === item.sym)){
+                    if(prefs.freeTrade === false && journal.some(e => e.paper && e.result === 'open' && e.sym === item.sym)){
                       Bus.show('Masz już otwartą pozycję paper na ' + item.sym);
                       return;
                     }

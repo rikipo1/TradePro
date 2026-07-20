@@ -89,6 +89,16 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
               Bus.show(nv ? '🎯 Alert okazji: powiadomię o dobrych sytuacjach (korekta, odwrócenie, retest wybicia, OB) gdy cena zbliża się do strefy' : 'Alert okazji wyłączony');
               return { ...p, pbAlert:nv };
             })}>{(prefs.pbAlert !== false) ? '🎯 ALERT OKAZJI' : '○ Alert okazji'}</button>
+          <button className={'chip mono' + ((prefs.freeTrade !== false) ? ' sel' : ' off')}
+            style={(prefs.freeTrade !== false) ? {color:'var(--up)', borderColor:'rgba(47,214,174,.4)'} : null}
+            onClick={() => setPrefs(p => {
+              const nv = !(p.freeTrade !== false);
+              Bus.show(nv ? '🔓 Swobodny trading: bez limitów — wiele pozycji naraz, bez blokad portfela/kill-switch' : '🔒 Limity ryzyka aktywne: max ekspozycja, korelacje, kill-switch');
+              return { ...p, freeTrade:nv };
+            })}>{(prefs.freeTrade !== false) ? '🔓 SWOBODNY TRADING' : '🔒 Limity ryzyka'}</button>
+        </div>
+        <div style={{fontSize:11, color:'var(--dim2)', marginBottom:10, lineHeight:1.4}}>
+          🔓 <b>Swobodny trading</b> (domyślnie WŁ.): otwierasz dowolną liczbę pozycji, także wiele na tym samym instrumencie — blokady portfela (suma ryzyka, korelacje, VaR) i kill-switch dnia stają się tylko ostrzeżeniami. Wyłącz, by przywrócić pełną ochronę kapitału.
         </div>
         <div style={{fontSize:11.5, color:'var(--dim2)', marginBottom:6}}>
           Minimalny score wejścia: <b className="mono" style={{color:'var(--text)'}}>±{prefs.minScore != null ? prefs.minScore : 30}</b>
