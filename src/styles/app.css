@@ -228,3 +228,8 @@
     .ph-price{ font-size:20px; }
     .chartwrap{ min-height:160px; }
   }
+
+  /* boks OHLC (krzyżyk) mniejszy w poziomie / pełnym ekranie — nie zasłania świec */
+  @media (orientation: landscape) and (max-height: 620px){
+    .ohlcbox{ font-size:9.5px; line-height:1.45; padding:5px 8px; max-width:52%; top:6px; left:6px; }
+  }
