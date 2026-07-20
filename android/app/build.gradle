@@ -6,8 +6,10 @@ if (keystorePropsFile.exists()) {
     keystoreProps.load(new FileInputStream(keystorePropsFile))
 }
 
-// versionCode increments per CI build (VERSION_CODE) so a new APK installs over the old one.
-def versionCodeValue = (System.getenv("VERSION_CODE") ?: "1").toInteger()
+// versionCode increments per CI build (VERSION_CODE = run number) so a new APK installs
+// over the old one. The 20000 offset guarantees we outrank APKs from earlier build lines
+// (e.g. an installed v1.7.0 whose versionCode did not come from this repo's run numbers).
+def versionCodeValue = 20000 + (System.getenv("VERSION_CODE") ?: "1").toInteger()
 
 // versionName comes from package.json so the app and the APK always agree on the version.
 def packageJson = new groovy.json.JsonSlurper().parseText(rootProject.file("../package.json").text)
