@@ -30,7 +30,8 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   const v = a => (a && a[i] != null) ? a[i] : null;
   let atr = v(ind.atr);
   if(atr == null){
-    for(let q=ind.atr.length-1;q>=0;q--){ if(ind.atr[q] != null){ atr = ind.atr[q]; break; } }
+    /* fallback tylko WSTECZ od i — skan całej serii zaglądał w przyszłość w backteście */
+    for(let q=Math.min(i, ind.atr.length-1);q>=0;q--){ if(ind.atr[q] != null){ atr = ind.atr[q]; break; } }
   }
   if(!atr) return null;
 
@@ -304,6 +305,14 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   if(dir === 1 && bullPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — LONG odrzucony'); }
   if(dir === -1 && bearPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — SHORT odrzucony'); }
 
+  /* MINIMALNY SCORE (suwak w ustawieniach) — wcześniej ustawienie było martwe:
+     silnik czytał tylko __minProb, którego nic nie ustawiało. W konsolidacji
+     próg rośnie o rangeBonus (jak obiecuje opis w INFO). */
+  const minScoreCfg = (srOverride && srOverride.__minScore != null) ? srOverride.__minScore : 30;
+  const effMinScore = minScoreCfg + (rangeMode ? (cfg.rangeBonus != null ? cfg.rangeBonus : 15) : 0);
+  if(dir === 1 && score < effMinScore){ warns.push('Confluence ' + score + ' poniżej progu ' + effMinScore + ' — LONG odrzucony'); dir = 0; }
+  else if(dir === -1 && score > -effMinScore){ warns.push('Confluence ' + score + ' powyżej progu −' + effMinScore + ' — SHORT odrzucony'); dir = 0; }
+
   /* P(win | dir) z modelu + kalibracja isotonic (jeśli wyuczona z ≥150 próbek) */
   const calibMap = (srOverride && srOverride.__calib) || null;
   let prob = dir !== 0 ? predictProb(orientedVector(factors, dir), weights) : 0.5;
@@ -370,46 +379,61 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
              : (dir === -1 && nearRes) ? (nearRes.hi - price + wick + spr)
              : atr*1.1;
     }
-    /* tylko dolna klamra (nie ściskamy SL PRZED realny swing — invalidacja
-       ma być za strukturą; zbyt daleki swing reguluje sizing, nie ucięty SL) */
+    /* dolna klamra (nie ściskamy SL przed realny swing) + GÓRNA klamra:
+       swing dalej niż 2.5×ATR dawał nietradowalny stop (i zabijał RR do
+       każdego celu) — powyżej tego SL to limit zmienności, nie struktura */
     slDist = Math.max(atr*0.5, slDist);
+    if(slDist > atr*2.5){
+      warns.push('Swing struktury ' + (slDist/atr).toFixed(1) + '×ATR od wejścia — SL ograniczony do 2.5×ATR (pełna inwalidacja dalej)');
+      slDist = atr*2.5;
+    }
     const sl = dir === 1 ? entry - slDist : entry + slDist;
 
-    /* --- TAKE PROFIT: najbliższy magnes płynności / strefa / swing przeciwny --- */
+    /* --- TAKE PROFIT: najbliższy magnes płynności / strefa / swing przeciwny.
+       Poziomy bliżej niż 0.5×ATR to szum (np. dzienne high o 2 tiki wyżej) —
+       nie są ani sensownym celem, ani realną przeszkodą; pomijamy je.
+       hard=true: realna struktura (strefa S/R, swing, equal) — tylko ona może
+       zablokować setup przez RR; magnesy płynności/profil (soft) są celem,
+       ale nie przeszkodą (dzienne high w dniu trendowym pęka wielokrotnie). --- */
     const targets = [];
+    const minTgt = Math.max(atr*0.5, spr*3);
+    const pushT = (px, why, hard) => { if(px != null && Math.abs(px - entry) >= minTgt) targets.push({ px, why, hard:!!hard }); };
     const draw = drawOnLiquidity(liq, entry, dir); // PDH/PDL/dzienne high-low = magnes płynności
     if(dir === 1){
-      if(smc.eq.eqHigh && smc.eq.eqHigh > entry) targets.push({ px:smc.eq.eqHigh, why:'equal highs (płynność)' });
-      if(draw && draw.px > entry) targets.push({ px:draw.px, why:draw.label + ' (draw on liquidity)' });
-      if(nearRes && nearRes.lo > entry) targets.push({ px:nearRes.lo, why:'strefa oporu' });
-      if(vp && vp.vah > entry) targets.push({ px:vp.vah, why:'VAH (profil wolumenu)' });
-      if(smc.ms && smc.ms.lastSwingHigh.p > entry) targets.push({ px:smc.ms.lastSwingHigh.p, why:'poprzedni swing high' });
+      if(smc.eq.eqHigh && smc.eq.eqHigh > entry) pushT(smc.eq.eqHigh, 'equal highs (płynność)', true);
+      if(draw && draw.px > entry) pushT(draw.px, draw.label + ' (draw on liquidity)', false);
+      if(nearRes && nearRes.lo > entry) pushT(nearRes.lo, 'strefa oporu', true);
+      if(vp && vp.vah > entry) pushT(vp.vah, 'VAH (profil wolumenu)', false);
+      if(smc.ms && smc.ms.lastSwingHigh.p > entry) pushT(smc.ms.lastSwingHigh.p, 'poprzedni swing high', true);
     } else {
-      if(smc.eq.eqLow && smc.eq.eqLow < entry) targets.push({ px:smc.eq.eqLow, why:'equal lows (płynność)' });
-      if(draw && draw.px < entry) targets.push({ px:draw.px, why:draw.label + ' (draw on liquidity)' });
-      if(nearSup && nearSup.hi < entry) targets.push({ px:nearSup.hi, why:'strefa wsparcia' });
-      if(vp && vp.val < entry) targets.push({ px:vp.val, why:'VAL (profil wolumenu)' });
-      if(smc.ms && smc.ms.lastSwingLow.p < entry) targets.push({ px:smc.ms.lastSwingLow.p, why:'poprzedni swing low' });
+      if(smc.eq.eqLow && smc.eq.eqLow < entry) pushT(smc.eq.eqLow, 'equal lows (płynność)', true);
+      if(draw && draw.px < entry) pushT(draw.px, draw.label + ' (draw on liquidity)', false);
+      if(nearSup && nearSup.hi < entry) pushT(nearSup.hi, 'strefa wsparcia', true);
+      if(vp && vp.val < entry) pushT(vp.val, 'VAL (profil wolumenu)', false);
+      if(smc.ms && smc.ms.lastSwingLow.p < entry) pushT(smc.ms.lastSwingLow.p, 'poprzedni swing low', true);
     }
     targets.sort((a,b) => Math.abs(a.px-entry) - Math.abs(b.px-entry));
-    const structTP = targets[0] || null;
 
     const rrTo = px => (Math.abs(px - entry) - spr) / slDist;
     const minRR = prof.minRR || (cfg.minRR != null ? cfg.minRR : 1.5);
+    /* TP1 = najbliższy cel spełniający minRR; brak → syntetyczny minRR */
+    const tpPick = targets.find(t => rrTo(t.px) >= minRR) || null;
     let tp1, tp1why, rr1;
-    if(structTP && rrTo(structTP.px) >= minRR){
-      tp1 = structTP.px; tp1why = structTP.why; rr1 = +rrTo(structTP.px).toFixed(2);
+    if(tpPick){
+      tp1 = tpPick.px; tp1why = tpPick.why; rr1 = +rrTo(tpPick.px).toFixed(2);
     } else {
       tp1 = dir === 1 ? entry + slDist*minRR + spr : entry - slDist*minRR - spr; tp1why = 'RR ' + minRR + 'R'; rr1 = minRR;
     }
-    const tp2 = targets[1] ? targets[1].px : (dir === 1 ? entry + slDist*2.5 + spr : entry - slDist*2.5 - spr);
+    const tp2t = targets.find(t => rrTo(t.px) > rr1 + 0.3) || null;
+    const tp2 = tp2t ? tp2t.px : (dir === 1 ? entry + slDist*2.5 + spr : entry - slDist*2.5 - spr);
     const rr2 = +rrTo(tp2).toFixed(2);
 
-    /* --- TWARDY GATE: struktura blisko blokuje RR<min → sygnał odrzucony --- */
-    if(structTP && rrTo(structTP.px) < minRR){
-      const blocks = dir === 1 ? (structTP.px < entry + slDist*minRR) : (structTP.px > entry - slDist*minRR);
+    /* --- TWARDY GATE: REALNA struktura blisko (RR<min) blokuje setup --- */
+    const hardNear = targets.find(t => t.hard) || null;
+    if(hardNear && rrTo(hardNear.px) < minRR){
+      const blocks = dir === 1 ? (hardNear.px < entry + slDist*minRR) : (hardNear.px > entry - slDist*minRR);
       if(blocks){
-        warns.push('Najbliższa struktura (' + structTP.why + ') daje RR ' + rrTo(structTP.px).toFixed(2) + ' < ' + minRR + ' — setup odrzucony (brak miejsca do celu)');
+        warns.push('Najbliższa struktura (' + hardNear.why + ') daje RR ' + rrTo(hardNear.px).toFixed(2) + ' < ' + minRR + ' — setup odrzucony (brak miejsca do celu)');
         out.dir = 0; dir = 0; out.rrBlock = true;
       }
     }
@@ -553,7 +577,7 @@ export function indicatorsFor(candles, tfId){
   for(let i=0;i<EMA_DEFS.length;i++){ emaData[EMA_DEFS[i].n] = emaSeries(closes, EMA_DEFS[i].n); }
   return { ind, emaData, hasVol };
 }
-export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, smcCfg, weights, calib){
+export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, smcCfg, weights, calib, knn){
   const data = await getChart(symbol, tf, source);
   if(!data || !data.candles || data.candles.length < 30) return { data, signal:null };
   const pack = indicatorsFor(data.candles, tf.id);
@@ -571,6 +595,7 @@ export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, 
   srWithHtf.__smc = smcCfg || null;
   srWithHtf.__weights = weights || null;
   srWithHtf.__calib = calib || null;
+  srWithHtf.__knn = knn || null; // skaner tła używa tej samej pamięci kNN co wykres
   const signal = computeSignal(data.candles, pack.ind, pack.emaData, patterns, pack.hasVol, null, srWithHtf);
   return { data, signal, demo: !!data.demo };
 }

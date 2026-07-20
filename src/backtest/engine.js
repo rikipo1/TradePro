@@ -40,11 +40,11 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
       const stopHit = dir === 1 ? c.l <= open.slCur : c.h >= open.slCur;
 
       if(stopHit){
-        let r, out2, tp2f = false;
+        let r, out2;
         if(open.stage === 'open'){ r = -1 - costR; out2 = 'SL'; }
         else if(open.stage === 'be'){ r = rOf(open.slCur) - costR; out2 = 'BE'; }
-        else { r = open.banked + 0.5*rOf(open.slCur) - costR; out2 = 'TP1'; tp2f = open.sawTp2 === true; }
-        close({ i0:open.i0, i1:i, dir, r:+r.toFixed(3), out:out2, tp2:tp2f, prob:open.prob });
+        else { r = open.banked + 0.5*rOf(open.slCur) - costR; out2 = 'TP1'; }
+        close({ i0:open.i0, i1:i, dir, r:+r.toFixed(3), out:out2, tp2:false, prob:open.prob });
         open = null; cooldownUntil = i + 5;
         continue;
       }
@@ -76,7 +76,6 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
         const aI = ind.atr[i] != null ? ind.atr[i] : open.risk*0.5;
         open.slCur = dir === 1 ? Math.max(open.slCur, ext - aI*0.25)
                                : Math.min(open.slCur, ext + aI*0.25);
-        if(dir === 1 ? c.h >= open.tp2 : c.l <= open.tp2) open.sawTp2 = true;
       }
       if(i - open.i0 >= maxBars){                              // time-stop
         const base = open.stage === 'runner' ? open.banked + 0.5*rOf(c.c) : rOf(c.c);

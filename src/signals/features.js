@@ -40,7 +40,14 @@ export function extractFactors(x) {
   if (rsi != null) { mom += clamp1((rsi - 50) / 20); momN++; }
   if (macdM != null && macdS != null) {
     let mv = macdM > macdS ? 0.5 : -0.5;
-    if (macdH != null && macdHp != null) mv += (macdH > macdHp ? 0.2 : -0.2) * (macdH > 0 ? 1 : -1);
+    /* histogram liczy się tylko gdy kierunek zmiany ZGADZA się ze znakiem
+       (rosnący nad zerem = byczo, spadający pod zerem = niedźwiedzio);
+       poprzedni zapis odwracał znak: rosnący histogram pod zerem (gasnąca
+       podaż) był karany jako niedźwiedzi. */
+    if (macdH != null && macdHp != null) {
+      if (macdH > macdHp && macdH > 0) mv += 0.2;
+      else if (macdH < macdHp && macdH < 0) mv -= 0.2;
+    }
     mom += clamp1(mv); momN++;
   }
   if (stochK != null && stochD != null && stochKp != null && stochDp != null) {

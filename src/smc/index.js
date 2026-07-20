@@ -3,8 +3,11 @@ import { sessionInfo } from '../utils/sessions.js';
 /* --- MARKET STRUCTURE z pivotów zigzag do indeksu i (bez lookahead) ---
    Zwraca sekwencję HH/HL/LH/LL, ostatnie swingi, oraz zakres do premium/discount. */
 export function marketStructure(piv, i){
-  // tylko potwierdzone piwoty przed/na i (odrzuć live pivot z przyszłości)
-  const P = piv.filter(p => p.i <= i);
+  // tylko POTWIERDZONE piwoty przed/na i — live pivot (bieżące, niedomknięte
+  // ekstremum nogi) repaintuje i fałszował swingi: SL/TP liczone od bieżącego
+  // maksimum/minimum zamiast od realnej struktury, a BOS nie mógł się wykryć
+  // (close nigdy nie przebije własnego running-high).
+  const P = piv.filter(p => p.i <= i && !p.live);
   if(P.length < 4) return null;
   const highs = P.filter(p => p.t === 'H');
   const lows  = P.filter(p => p.t === 'L');
@@ -39,7 +42,9 @@ export function premiumDiscount(ms, price, cfg){
   if(!ms || ms.rngHi <= ms.rngLo) return { zone:'?', pct:50 };
   const pTh = (cfg && cfg.premium != null) ? cfg.premium : 62;
   const dTh = (cfg && cfg.discount != null) ? cfg.discount : 38;
-  const pct = (price - ms.rngLo) / (ms.rngHi - ms.rngLo) * 100;
+  /* clamp 0–100: po wyłączeniu live pivotu cena może być poza zakresem
+     potwierdzonych swingów (świeże wybicie) — to nadal premium/discount 100/0 */
+  const pct = Math.max(0, Math.min(100, (price - ms.rngLo) / (ms.rngHi - ms.rngLo) * 100));
   let zone = 'equilibrium';
   if(pct >= pTh) zone = 'premium';
   else if(pct <= dTh) zone = 'discount';
@@ -184,7 +189,7 @@ export function detectLiquiditySweep(candles, ms, i, atr){
 /* --- EQUAL HIGHS / LOWS (magnesy płynności → cele TP) --- */
 export function detectEqualLevels(piv, i, atr){
   if(!atr) return { eqHigh:null, eqLow:null };
-  const P = piv.filter(p => p.i <= i);
+  const P = piv.filter(p => p.i <= i && !p.live); // tylko potwierdzone swingi
   const highs = P.filter(p => p.t === 'H').slice(-4);
   const lows  = P.filter(p => p.t === 'L').slice(-4);
   const tol = atr*0.25;

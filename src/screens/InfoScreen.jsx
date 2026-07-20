@@ -103,7 +103,7 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
           interwale co ~45 s i alarmuje o nowych sygnałach nawet bez otwartego wykresu
           (per instrument: dedup + cooldown 5 min). Pełna niezawodność w tle tylko w APK —
           w przeglądarce system usypia karty. <b style={{color:'var(--text)'}}>Tylko mocne</b> ogranicza
-          alerty do sygnałów ★ (score ≥ 55) i działa też na ekranie wykresu.
+          alerty do sygnałów ★ (P(win) ≥ 66%) i działa też na ekranie wykresu.
           <br/><br/><b style={{color:'var(--text)'}}>Jakość wejścia</b>: przy każdym sygnale apka mierzy,
           jak daleko cena odjechała od najbliższej kotwicy (EMA20 / strefa S/R / VWAP).
           „Przy strefie" (≤0.6×ATR) = świeże wejście z ciasnym SL — dostaje plus do score.

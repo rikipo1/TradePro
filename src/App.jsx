@@ -137,7 +137,7 @@ export function App(){
           const it = wl[s];
           if(!it || it.sym === activeSym) continue;
           let res = null;
-          try{ res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc, Store.get('rt_model_weights', null), Store.get('rt_model_calib', null)); }catch(e){ continue; }
+          try{ res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc, Store.get('rt_model_weights', null), Store.get('rt_model_calib', null), Store.get('rt_knn_history', null)); }catch(e){ continue; }
           if(res && res.data && res.data.candles && res.data.candles.length > 30){
             bgClosesRef.current[it.sym] = res.data.candles.slice(-200).map(cc => cc.c);
           }
