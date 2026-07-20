@@ -7,6 +7,7 @@ import { Net } from '../core/net.js';
 import { fetchQuotes, getChart } from '../data/feed.js';
 import { fmtClock, fmtPct, fmtPrice } from '../utils/format.js';
 import { notifyUser } from '../utils/notify.js';
+import { VERSION_LABEL } from '../version.js';
 
 export function WatchlistScreen({ wl, setWl, openChart, prefs, setPrefs }){
   const [quotes, setQuotes] = useState({});
@@ -67,7 +68,7 @@ export function WatchlistScreen({ wl, setWl, openChart, prefs, setPrefs }){
   return (
     <div className="screen">
       <div className="topbar">
-        <div className="brand">RIKIPO<em>TRADER</em><small>v1.3.3 · auto-epic</small></div>
+        <div className="brand">RIKIPO<em>TRADER</em><small>{VERSION_LABEL}</small></div>
         <div className="spacer" />
         <button className={'chip mono' + ((prefs.bgScan && prefs.alert) ? ' sel' : '')}
           style={(prefs.bgScan && prefs.alert) ? { color:'var(--up)', borderColor:'rgba(47,214,174,.4)' } : null}

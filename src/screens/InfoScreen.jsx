@@ -5,6 +5,7 @@ import { Net } from '../core/net.js';
 import { Store } from '../core/store.js';
 import { CapCfg, CapDbg, CapSess, capSession, capitalTick } from '../data/capital.js';
 import { fmtPrice } from '../utils/format.js';
+import { VERSION_LABEL } from '../version.js';
 
 export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl, journal, setJournal }){
   const [capTest, setCapTest] = useState({ busy:false, msg:'', ok:null });
@@ -549,7 +550,7 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
       </div>
 
       <div style={{textAlign:'center', padding:'10px 0 22px', fontSize:10.5, color:'var(--dim2)'}} className="mono">
-        Rikipo Trader v1.3.3 · auto-epic + diag · motyw Baltic Dawn
+        Rikipo Trader {VERSION_LABEL} · auto-epic + diag · motyw Baltic Dawn
       </div>
     </div>
   );
