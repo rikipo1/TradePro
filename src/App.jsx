@@ -148,7 +148,10 @@ export function App(){
            minimalizuje koszt; przy braku danych zostaje 1R + trailApprox) */
         let trailOpts;
         try{
-          const ent = openP.find(e => e.sym === sym && e.result === 'open');
+          /* obejmij też zlecenia OCZEKUJĄCE — knot dochodzący do entry
+             między odczytami aktywuje wejście (wcześniej pomijane) */
+          const ent = openP.find(e => e.sym === sym && e.result === 'open')
+                   || openP.find(e => e.sym === sym && e.result === 'pending');
           const tfObj = ent && ent.tf ? TFS.find(t => t.id === ent.tf) : null;
           if(tfObj){
             const ch = await getChart(sym, tfObj, prefs.source);

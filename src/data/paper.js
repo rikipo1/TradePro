@@ -22,8 +22,22 @@ export function resolvePaperList(list, sym, px, notify, opts){
 
     /* ---- zlecenie oczekujące: aktywacja / anulowanie ---- */
     if(e.result === 'pending'){
-      const touched = d === 1 ? px <= e.entry : px >= e.entry;
-      const invalidated = d === 1 ? px <= e.sl : px >= e.sl;
+      /* [FIX] aktywacja/unieważnienie po EKSTREMACH świec od złożenia zlecenia
+         (knot dotykający entry/SL między odczytami był wcześniej pomijany —
+         „wejścia nie zawsze łapały"). Świece brane od e.ts (60 s zapasu). */
+      let pLo = null, pHi = null;
+      if(opts && opts.bars && opts.bars.length){
+        for(let q = opts.bars.length - 1; q >= 0; q--){
+          const b = opts.bars[q];
+          if(b.t * 1000 < e.ts - 60000) break;
+          if(pLo == null || b.l < pLo) pLo = b.l;
+          if(pHi == null || b.h > pHi) pHi = b.h;
+        }
+      }
+      const lowPx  = pLo != null ? Math.min(px, pLo) : px;
+      const highPx = pHi != null ? Math.max(px, pHi) : px;
+      const touched = d === 1 ? lowPx <= e.entry : highPx >= e.entry;
+      const invalidated = d === 1 ? lowPx <= e.sl : highPx >= e.sl;
       const expired = e.pendingUntil && Date.now() > e.pendingUntil;
       if(invalidated || expired){
         changed = true;

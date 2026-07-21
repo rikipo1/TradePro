@@ -15,6 +15,12 @@ import { getChart } from '../data/feed.js';
 import { TFS } from '../data/yahoo.js';
 import { fmtPrice, pad2 } from '../utils/format.js';
 
+/* nazwa instrumentu do wyświetlenia: preferuj czytelną nazwę Capital.com
+   (US100, US500, GERMANY40, GOLD…) zamiast surowego symbolu Yahoo (^IXIC…) */
+export function prettySym(sym){
+  return (sym && CAP_MAP[sym]) ? CAP_MAP[sym] : sym;
+}
+
 export function fmtDT(ts){
   const d = new Date(ts);
   return pad2(d.getDate()) + '.' + pad2(d.getMonth()+1) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
@@ -128,7 +134,7 @@ export function JournalScreen({ journal, setJournal }){
           const esc = s => { const v = String(s == null ? '' : s); return /[",;\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
           const head = ['data','symbol','tf','kierunek','wejscie','SL','TP1','TP2','wynik','R','zrodlo','notatka'];
           const rows = journal.map(e => [
-            fmtDT(e.ts), e.sym, e.tf || '', e.dir > 0 ? 'LONG' : 'SHORT',
+            fmtDT(e.ts), prettySym(e.sym), e.tf || '', e.dir > 0 ? 'LONG' : 'SHORT',
             e.entry != null ? e.entry : '', e.sl != null ? e.sl : '',
             e.tp1 != null ? e.tp1 : '', e.tp2 != null ? e.tp2 : '',
             e.result, e.r != null ? e.r : '', e.src || '', e.note || '',
@@ -205,7 +211,7 @@ export function JournalScreen({ journal, setJournal }){
         const deg = degradation(roll, meta);
         return (
           <div className="card" style={{marginTop:2, borderColor: deg.degraded || meta.degradedAt ? 'rgba(255,201,77,.45)' : 'var(--border)'}}>
-            <div className="kv"><b>Monitoring modelu · {meta.sym}·{meta.tf}</b>
+            <div className="kv"><b>Monitoring modelu · {prettySym(meta.sym)}·{meta.tf}</b>
               <span className="mono" style={{color: meta.reliable ? 'var(--up)' : 'var(--ema9)'}}>
                 {meta.reliable ? 'AKTYWNY' : (meta.degradedAt ? 'ZDEGRADOWANY → wagi domyślne' : 'nieaktywny')}
               </span>
@@ -294,7 +300,7 @@ export function JournalScreen({ journal, setJournal }){
               <span style={{color: e.dir > 0 ? 'var(--up)' : 'var(--down)', fontWeight:900, width:18, flexShrink:0}}>{e.dir > 0 ? '▲' : '▼'}</span>
               <div style={{flex:1, minWidth:0}}>
                 <div className="wl-name" style={{whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
-                  {e.sym}{e.tf && e.tf !== '—' ? ' · ' + e.tf : ''}
+                  {prettySym(e.sym)}{e.tf && e.tf !== '—' ? ' · ' + e.tf : ''}
                   {e.paper ? <span className="tag" style={{marginLeft:6, color:'var(--cyan)'}}>{isExp ? '▾ wykres' : '▸ wykres'}</span> : null}
                   {e.src === 'signal' ? <span className="tag" style={{marginLeft:6}}>sygnał{e.score != null ? ' ' + (e.score > 0 ? '+' : '') + e.score : ''}</span> : null}
                   {e.src === 'auto' ? <span className="tag" style={{marginLeft:6, color:'var(--ema9)'}}>🤖 bot</span> : null}
@@ -383,7 +389,7 @@ export function JournalScreen({ journal, setJournal }){
         <div className="modal-bg" onClick={() => setPick(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div style={{fontWeight:900, fontSize:16, marginBottom:4}}>
-              Zamknij: {pick.sym} {pick.dir > 0 ? 'LONG' : 'SHORT'}
+              Zamknij: {prettySym(pick.sym)} {pick.dir > 0 ? 'LONG' : 'SHORT'}
             </div>
             <div style={{fontSize:12, color:'var(--dim2)', marginBottom:12}} className="mono">
               plan z {fmtDT(pick.ts)}{pick.entry != null ? ' · E ' + fmtPrice(pick.entry) : ''}

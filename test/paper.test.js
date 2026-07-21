@@ -72,6 +72,24 @@ test('[FIX] świece SPRZED wejścia nie wyzwalają SL', () => {
   assert.equal(out, null, 'stary knot nie zamyka pozycji');
 });
 
+test('[FIX] LIMIT aktywowany po KNOCIE świecy: LONG entry poniżej px, knot dotknął entry ⇒ open', () => {
+  // LONG limit entry 100 (SL 99). Cena próbki 100.4 (nie dotknęła entry), ale świeca
+  // po złożeniu zlecenia miała low 99.9 (knot zszedł do entry) → zlecenie się aktywuje.
+  const e = { id: 1, ts: 1000, sym: 'X', dir: 1, paper: true, entry: 100, sl: 99, risk: 1, tp1: 101.5, tp2: 102.5, rr1: 1.5, result: 'pending', r: 0 };
+  const bars = [{ t: 1, o: 100.5, h: 100.6, l: 99.9, c: 100.4, v: 0 }];
+  const out = resolvePaperList([e], 'X', 100.4, null, { bars });
+  assert.ok(out, 'lista zmieniona');
+  assert.equal(out[0].result, 'open');
+  assert.equal(out[0].stage, 'open');
+});
+
+test('[FIX] LIMIT bez knota na entry pozostaje oczekujący', () => {
+  const e = { id: 1, ts: 1000, sym: 'X', dir: 1, paper: true, entry: 100, sl: 99, risk: 1, tp1: 101.5, tp2: 102.5, rr1: 1.5, result: 'pending', r: 0 };
+  const bars = [{ t: 1, o: 100.5, h: 100.7, l: 100.2, c: 100.4, v: 0 }]; // low 100.2 > entry 100
+  const out = resolvePaperList([e], 'X', 100.4, null, { bars });
+  assert.equal(out, null, 'brak zmiany — cena nie dotknęła entry');
+});
+
 test('paperFloating: runner liczy banked + połowę biegu', () => {
   const e = baseEntry({ stage: 'runner', banked: 0.75 });
   assert.ok(Math.abs(paperFloating(e, 102) - (0.75 + 0.5 * 2)) < 1e-9);

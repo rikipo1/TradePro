@@ -52,6 +52,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     return () => clearInterval(h);
   }, [trainCool > 0]);
   const prevDirRef = useRef(0);
+  const liveCandlesRef = useRef([]);
   const lastAlertRef = useRef({ dir:0, t:0, bar:null });
   const pbAlertRef = useRef({ key:null, t:0 });
   const macroRef = useRef(null);
@@ -135,10 +136,26 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
           if(px < last.l) last.l = px;
           cs[cs.length-1] = last;
         }
+        liveCandlesRef.current = cs;   // najświeższe świece (z knotami) do rozliczeń
         return Object.assign({}, d, { candles:cs, price:px, live:true });
       });
       setUpdated(new Date());
-      resolveTick(item.sym, px);
+      /* [FIX] rozliczaj paper po EKSTREMACH świec (knoty), tak jak skaner tła w App.jsx —
+         inaczej na ekranie wykresu wejścia/TP1/TP2/SL nie zawsze „łapały" (tylko cena próbki) */
+      const cs = liveCandlesRef.current;
+      let ropts;
+      if(cs && cs.length >= 20){
+        const last8 = cs.slice(-8);
+        const atrArr = atrSeries(cs.slice(-60), 14);
+        let atr = null;
+        for(let q=atrArr.length-1; q>=0; q--){ if(atrArr[q] != null){ atr = atrArr[q]; break; } }
+        ropts = {
+          bars: cs.slice(-40), atr,
+          trailLow: Math.min(...last8.map(c => c.l)),
+          trailHigh: Math.max(...last8.map(c => c.h)),
+        };
+      }
+      resolveTick(item.sym, px, ropts);
     };
     const flushH = setInterval(() => {
       if(pending.px == null) return;
@@ -876,6 +893,15 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
           posMarkers={posMarkers}
           resetKey={item.sym + '|' + tf.id}
         />
+        {/* zawsze widoczny przycisk pełnego ekranu (pasek górny bywa ciasny na wąskich ekranach) */}
+        {candlesSafe.length > 0 && (
+          <button title="Pełny ekran wykresu" onClick={() => setFs(true)}
+            style={{position:'absolute', top:8, right:8, zIndex:5, width:34, height:34, borderRadius:10,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              background:'rgba(5,27,33,.72)', border:'1px solid var(--border2)', color:'var(--text)', backdropFilter:'blur(3px)'}}>
+            <span style={{fontSize:16, lineHeight:1}}>⛶</span>
+          </button>
+        )}
         {loading && !candlesSafe.length && (
           <div className="overlaymsg"><div className="loader" /><div style={{color:'var(--dim)', fontSize:13}}>Pobieram świece {tf.label}…</div></div>
         )}
