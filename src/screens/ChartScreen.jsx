@@ -1431,9 +1431,18 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                     }catch(e){}
                   }
                   setTimeout(() => {
+                    /* [PARYTET] backtest MUSI liczyć na tym samym modelu co live:
+                       wagi wyuczone WYŁĄCZNIE gdy model jest wiarygodny dla TEGO
+                       instrumentu·TF — inaczej live jedzie na domyślnych, a panel
+                       pokazywałby zawyżony wynik in-sample z wyuczonych wag. */
+                    const mMeta = Store.get('rt_model_meta', null);
+                    const modelMatch = !!(mMeta && mMeta.reliable && mMeta.sym === item.sym && mMeta.tf === tf.id);
+                    const useW = modelMatch ? Store.get('rt_model_weights', null) : null;
+                    const useC = modelMatch ? Store.get('rt_model_calib', null) : null;
                     const r = backtestEngine(cc, cpack.ind, cpack.emaData, cpack.hasVol, item.sym, prefs.minScore, prefs.smc,
-                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
+                      { weights: useW, calib: useC, tfId: tf.id });
                     r.trainMeta = { candles: cc.length, extended: cext, source: csrc };
+                    r.modelUsed = modelMatch ? 'wyuczone' : 'domyślne';
                     r.candlesUsed = cc;
                     setBt({ busy:false, res:r });
                   }, 40);
@@ -1501,9 +1510,14 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                     } else {
                       Bus.show('Trening nieudany: ' + (wf ? wf.reason : 'brak danych'));
                     }
+                    /* uwaga: to przebieg IN-SAMPLE na wyuczonych wagach (pełna
+                       historia treningu) — górne statystyki są opisowe/zawyżone;
+                       uczciwy dowód to blok walk-forward OOS niżej */
                     const r = backtestEngine(trainCandles, tpack.ind, tpack.emaData, tpack.hasVol, item.sym, prefs.minScore, prefs.smc,
-                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
+                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), tfId: tf.id });
                     r.wf = wf;
+                    r.inSample = true;
+                    r.modelUsed = 'wyuczone (in-sample)';
                     r.trainMeta = { candles: trainCandles.length, extended: ext, source: tsrc };
                     r.candlesUsed = trainCandles;
                     setBt({ busy:false, res:r });
@@ -1607,6 +1621,18 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                     </div>
                   ) : (
                     <React.Fragment>
+                      {bt.res.modelUsed && (
+                        <div style={{fontSize:11, lineHeight:1.55, marginBottom:8, padding:'7px 10px', borderRadius:9,
+                          color: bt.res.inSample ? 'var(--ema9)' : 'var(--dim)',
+                          background: bt.res.inSample ? 'rgba(255,201,77,.08)' : 'var(--bg)',
+                          border: '1px solid ' + (bt.res.inSample ? 'rgba(255,201,77,.35)' : 'var(--border)')}} className="mono">
+                          {bt.res.inSample
+                            ? '⚠ Wynik IN-SAMPLE (wagi wyuczone na tej samej historii) — górne liczby są zawyżone. Uczciwy dowód: blok „walk-forward OOS" niżej.'
+                            : bt.res.modelUsed === 'wyuczone'
+                              ? '✓ Model wyuczony i wiarygodny dla tego instrumentu — backtest liczy identycznie jak live.'
+                              : 'Model: wagi DOMYŚLNE — dokładnie to, czego używa live (model niewyuczony/niewiarygodny dla tego instrumentu·TF).'}
+                        </div>
+                      )}
                       <div style={{background:'var(--bg)', border:'1px solid var(--border2)', borderRadius:12, padding:'10px 12px'}}>
                         <div className="kv"><b>Transakcje</b><span className="mono">{bt.res.stats.n} (▲{bt.res.stats.longs} / ▼{bt.res.stats.shorts})</span></div>
                         <div className="kv"><b>Trafność (TP1 vs SL)</b><span className="mono" style={{color: bt.res.stats.winRate >= 40 ? 'var(--up)' : 'var(--down)'}}>{bt.res.stats.winRate.toFixed(0)}%<span style={{color:'var(--dim2)', fontWeight:500}}> ({bt.res.stats.wins}/{bt.res.stats.wins + bt.res.stats.losses})</span></span></div>
