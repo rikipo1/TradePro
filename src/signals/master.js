@@ -97,6 +97,9 @@ export function masterVerdict({ candles, tfId, tfSec, signal, rank }) {
        pewności rankingu, który go wykrył — bonusy kontekstu nie mogą
        zamienić scenariusza w „pewniaka" */
     if (state === 'setup') confidence = Math.min(confidence, Math.max(5, rankConf - 5));
+    /* gra pod prąd drabiny (choćby lekko ujemnej) = KOREKTA, nie trend —
+       ocena ścięta do C, żeby nigdy nie wyszły dwa „A" w przeciwne strony */
+    if (state === 'setup' && usedW > 0 && align * dir < 0) confidence = Math.min(confidence, 55);
   }
 
   /* gotowość do paska: wejście=100, setup wysoko, czekaj wg etapu lejka */
@@ -138,6 +141,9 @@ export function masterVerdict({ candles, tfId, tfSec, signal, rank }) {
         + (rank.best ? ' — ' + rank.best.name : '')
         + (sigDir !== 0 ? (rankDir === sigDir ? ' · ZGODNY z silnikiem' : ' · PRZECIWNY do silnika — ostrożnie') : '')
       : 'ranking 🏛: brak setupu ≥ progu');
+  }
+  if (state === 'setup' && usedW > 0 && align * dir < 0) {
+    reasons.push('setup pod prąd drabiny (' + fmtAlign(align) + ') — to KOREKTA przeciw trendowi wyższego rzędu, ocena ścięta');
   }
   if (veto) reasons.push('VETO: ' + veto);
   if (rank && rank.scores && rank.scores.risk >= 50) {

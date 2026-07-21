@@ -336,21 +336,64 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [barSig, item.sym, tf.id, journal, wv]);
 
+  /* 🌐 kanoniczny feed MASTER: M15, NIEZALEŻNIE od oglądanego interwału.
+     Bez tego werdykt liczył się ze świec bieżącego widoku i na H1 potrafił
+     mówić SHORT, a na M15 LONG w tej samej minucie. Teraz drabina i detektory
+     zawsze pracują na tym samym materiale → jeden globalny werdykt. */
+  const [mfeed, setMfeed] = useState(null);
+  useEffect(() => {
+    let stop = false;
+    if(tf.id === 'M15') return; // widok M15 = kanon, drugi fetch zbędny
+    const M15 = TFS.find(t => t.id === 'M15');
+    const pull = async () => {
+      try{
+        const r = await getChart(item.sym, M15, prefs.source);
+        if(!stop && r && r.candles && r.candles.length >= 60) setMfeed({ sym:item.sym, candles:r.candles });
+      }catch(e){}
+    };
+    pull();
+    const h = setInterval(pull, 60000);
+    return () => { stop = true; clearInterval(h); };
+  }, [item.sym, prefs.source, tf.id]);
+
+  /* ranking 🏛 na feedzie kanonicznym (gdy widok ≠ M15) — przeliczany tylko
+     przy odświeżeniu feedu (60 s), nie na każdym ticku */
+  const canonRank = useMemo(() => {
+    if(tf.id === 'M15' || !mfeed || mfeed.sym !== item.sym || mfeed.candles.length < 60) return null;
+    try{
+      const pack = indicatorsFor(mfeed.candles, 'M15');
+      if(!pack) return null;
+      const ctx = buildStrategyCtx(mfeed.candles, pack.ind, pack.emaData, pack.hasVol, item.sym, 900, null);
+      return ctx ? rankStrategies(ctx, journal) : null;
+    }catch(e){ return null; }
+  }, [mfeed, item.sym, tf.id, journal]);
+
   /* ⚡ SILNIK NADRZĘDNY MASTER — jeden werdykt z: silnika k-fold (trigger),
      rankingu 🏛 (konfluencja) i drabiny WSZYSTKICH interwałów (kontekst
-     top-down). Zastępuje w UI dwa osobne, czasem sprzeczne paski. */
+     top-down), liczony z kanonu M15 — ten sam na każdym widoku. */
   const master = useMemo(() => {
     if(!candlesSafe.length) return null;
     try{
-      return masterVerdict({ candles: candlesSafe, tfId: tf.id, tfSec: TF_SEC[tf.id] || 300, signal, rank: stratRank });
+      if(tf.id === 'M15'){
+        return masterVerdict({ candles: candlesSafe, tfId:'M15', tfSec:900, signal, rank: stratRank });
+      }
+      if(mfeed && mfeed.sym === item.sym && mfeed.candles.length >= 60){
+        return masterVerdict({ candles: mfeed.candles, tfId:'M15', tfSec:900, signal, rank: canonRank });
+      }
+      /* kanon jeszcze się ładuje — tymczasowo licz z widoku (oznaczone) */
+      const m = masterVerdict({ candles: candlesSafe, tfId: tf.id, tfSec: TF_SEC[tf.id] || 300, signal, rank: stratRank });
+      if(m) m.provisional = true;
+      return m;
     }catch(e){ return null; }
-  }, [candlesSafe, tf.id, signal, stratRank]);
+  }, [candlesSafe, tf.id, signal, stratRank, mfeed, canonRank, item.sym]);
 
-  /* najlepsza „okazja" poza samym aktywnym sygnałem (do paska i alertu) */
+  /* najlepsza „okazja" poza samym aktywnym sygnałem (do paska i alertu);
+     okazje z RR < 1.2 odsiane — proponowanie wejścia z celem bliżej niż
+     ryzyko to amatorka, która tylko zaśmiecała ekran */
   const topOpp = useMemo(() => {
     const ops = signal && signal.opportunities;
     if(!ops || !ops.length) return null;
-    return ops.find(o => o.kind !== 'signal-now') || null;
+    return ops.find(o => o.kind !== 'signal-now' && (o.rr == null || o.rr >= 1.2)) || null;
   }, [signal]);
 
   /* znaczniki WEJŚĆ w otwarte pozycje paper na tym symbolu (na wykresie) */
@@ -749,7 +792,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   color:'#051b21', background:dcol}}>{m.grade} · {m.confidence}%</span>
               )}
               <span className="mono" style={{flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:10.5, color:'var(--dim)'}}>
-                {m.ladder.map(f => f.id + (f.dir > 0 ? '▲' : f.dir < 0 ? '▼' : '•')).join(' ')}
+                {(m.provisional ? '' : '🌐 ') + m.ladder.map(f => f.id + (f.dir > 0 ? '▲' : f.dir < 0 ? '▼' : '•')).join(' ')}
               </span>
               {m.dir !== 0 && L && (
                 <button className="stratbtn" onClick={(ev) => {
@@ -800,6 +843,11 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
               <span className="mono" style={{fontSize:10.5, fontWeight:800, color:st.col}}>{st.ic} {st.txt}</span>
               <span className="mono" style={{fontSize:10.5, fontWeight:800, padding:'1px 6px', borderRadius:6, color:'#051b21', background:'#ffc94d'}}>{op.grade} · {op.confidence}%</span>
             </div>
+            {master && master.dir !== 0 && op.dir !== master.dir && (
+              <div className="mono" style={{fontSize:10.5, fontWeight:800, color:'var(--ema9)'}}>
+                ⚠ przeciw werdyktowi ⚡ MASTER ({master.verdict}) — to gra na korektę, nie z trendem
+              </div>
+            )}
             <div className="mono" style={{display:'flex', alignItems:'center', gap:8, fontSize:11.5}}>
               <span style={{color:'var(--text)', fontWeight:800}}>wejście ~{fmtPrice(op.entry)}</span>
               {op.target != null && <span style={{color:'var(--dim2)'}}>cel {fmtPrice(op.target)}{op.rr != null ? ' · RR ' + op.rr : ''}</span>}
@@ -1667,6 +1715,11 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 </div>
                 <div className="mono" style={{fontSize:11, color:'var(--dim2)', marginTop:6}}>
                   zgodność ważona: {(m.align > 0 ? '+' : '') + m.align} — wyższa ramka waży więcej; master nie gra przeciw zgodnej drabinie
+                </div>
+                <div style={{fontSize:10.5, color: m.provisional ? 'var(--ema9)' : 'var(--dim2)', marginTop:5, lineHeight:1.5}}>
+                  {m.provisional
+                    ? '⏳ kanon M15 jeszcze się ładuje — werdykt tymczasowo z oglądanego interwału'
+                    : '🌐 werdykt GLOBALNY: liczony zawsze z kanonu M15 — identyczny niezależnie od tego, który interwał oglądasz'}
                 </div>
               </div>
 
