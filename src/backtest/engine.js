@@ -1,9 +1,10 @@
-import { spreadPx } from '../constants/instruments.js';
+import { spreadPx, instrProfile } from '../constants/instruments.js';
 import { findSRZones } from '../indicators/index.js';
 import { detectCandlePatterns } from '../patterns/index.js';
 import { computeSignal } from '../signals/engine.js';
 import { orientedVector } from '../signals/features.js';
 import { trainLogistic, fitIsotonic, brierScore } from '../signals/model.js';
+import { classifyRegime } from '../signals/regime.js';
 import { htfTrend } from '../data/feed.js';
 
 /* ---------------- Faza 6: backtest / alerty ----------------
@@ -17,6 +18,7 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
   const res = { trades:[], equity:[0], stats:null, samples:[] };
   if(n < 90 || !ind) return res;
   const patsWrap = { list: detectCandlePatterns(candles, emaData[20], ind.atr, hasVol) };
+  const slipAtr = instrProfile(sym).slipAtr || 0; // [E3-3] poślizg SL per klasa
   const warmup = 60, maxBars = 60;
   let open = null, cooldownUntil = -1, sum = 0;
   const close = t => {
@@ -40,10 +42,14 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
       const stopHit = dir === 1 ? c.l <= open.slCur : c.h >= open.slCur;
 
       if(stopHit){
+        /* [E3-3] fill SL z poślizgiem: slCur − dir·slip, slip = slipAtr·ATR —
+           wyłącznie w backteście (model pesymistyczny; live rozlicza broker) */
+        const slip = (ind.atr[i] != null ? ind.atr[i] : 0) * slipAtr;
+        const fill = open.slCur - dir * slip;
         let r, out2, tp2f = false;
-        if(open.stage === 'open'){ r = -1 - costR; out2 = 'SL'; }
-        else if(open.stage === 'be'){ r = rOf(open.slCur) - costR; out2 = 'BE'; }
-        else { r = open.banked + 0.5*rOf(open.slCur) - costR; out2 = 'TP1'; tp2f = open.sawTp2 === true; }
+        if(open.stage === 'open'){ r = rOf(fill) - costR; out2 = 'SL'; }
+        else if(open.stage === 'be'){ r = rOf(fill) - costR; out2 = 'BE'; }
+        else { r = open.banked + 0.5*rOf(fill) - costR; out2 = 'TP1'; tp2f = false; }
         close({ i0:open.i0, i1:i, dir, r:+r.toFixed(3), out:out2, tp2:tp2f, prob:open.prob });
         open = null; cooldownUntil = i + 5;
         continue;
@@ -76,7 +82,8 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
         const aI = ind.atr[i] != null ? ind.atr[i] : open.risk*0.5;
         open.slCur = dir === 1 ? Math.max(open.slCur, ext - aI*0.25)
                                : Math.min(open.slCur, ext + aI*0.25);
-        if(dir === 1 ? c.h >= open.tp2 : c.l <= open.tp2) open.sawTp2 = true;
+        /* [A10] usunięty martwy warunek sawTp2 — dotknięcie TP2 zamyka runnera
+           powyżej (tp2:true), a SL-first w tej samej świecy ma zostać SL */
       }
       if(i - open.i0 >= maxBars){                              // time-stop
         const base = open.stage === 'runner' ? open.banked + 0.5*rOf(c.c) : rOf(c.c);
@@ -91,9 +98,12 @@ export function backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smc
     if(sym) zonesI.__sym = sym;
     if(minScore != null) zonesI.__minScore = minScore;
     if(smcCfg) zonesI.__smc = smcCfg;
-    if(weights) zonesI.__weights = weights;
+    /* [A3] backtest z jawnie podanym modelem = przebieg walidacyjny tego modelu;
+       __reliable włącza go w computeSignal dokładnie jak w torze live */
+    if(weights){ zonesI.__weights = weights; zonesI.__reliable = true; }
     if(calib) zonesI.__calib = calib;
     if(opts && opts.knn) zonesI.__knn = opts.knn;
+    if(opts && opts.ablate) zonesI.__ablate = opts.ablate; // [E2-1] harness ablacyjny
     /* K2: HTF liczony PRZYCZYNOWO per świeca — dokładnie jak live. Bez tego
        trening widział htf=0 zawsze, a live htf≠0 (rozjazd cech train/serve). */
     if(tfId) zonesI.__htf = htfTrend(candles.slice(0, i + 1), tfId);
@@ -156,45 +166,141 @@ export function statsOf(T){
   };
 }
 
-/* WALK-FORWARD: trenuj wagi na pierwszych 60% danych, testuj OUT-OF-SAMPLE na
-   ostatnich 40% z wyuczonymi wagami.
-   K1 (EMBARGO): transakcja otwarta tuż przed splitem rozstrzyga się PO splicie
-   — jej etykieta niesie informację z okresu testowego. Do treningu bierzemy
-   więc wyłącznie próbki ZAMKNIĘTE przed splitem (i1 < split). Zero przecieku.
-   K4: na predykcjach treningowych fitujemy kalibrację isotonic (gdy ≥150
-   próbek), a na OOS liczymy Brier — jedyną uczciwą miarę jakości P.        */
-export function walkForward(candles, ind, emaData, hasVol, sym, minScore, smcCfg, tfId){
+/* kwantyl z listy liczb (interpolowany); null dla pustej listy */
+function quantile(arr, q){
+  if(!arr || !arr.length) return null;
+  const s = arr.slice().sort((a, b) => a - b);
+  const idx = (s.length - 1) * q;
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  return +(s[lo] + (s[hi] - s[lo]) * (idx - lo)).toFixed(4);
+}
+
+/* [A4] Empiryczna dystrybucja wypłat z transakcji OOS. Model liniowy EV
+   zakłada wypłatę pełnego rr1 i zero BE/TIMEOUT — realny schemat (partial
+   na TP1 + runner + spory udział BE) wygląda inaczej. Zwraca null gdy n<30. */
+export function computePayout(trades){
+  if(!trades || trades.length < 30) return null;
+  const n = trades.length;
+  const wins = trades.filter(t => t.out === 'TP1');
+  const be   = trades.filter(t => t.out === 'BE');
+  const to   = trades.filter(t => t.out === 'TIMEOUT');
+  const avg = a => a.length ? a.reduce((s, t) => s + t.r, 0) / a.length : 0;
+  return {
+    n,
+    eWin: wins.length ? +avg(wins).toFixed(3) : null, // śr. R zwycięzcy (partial+runner)
+    pBE: +(be.length / n).toFixed(3), eBE: +avg(be).toFixed(3),
+    pTO: +(to.length / n).toFixed(3), eTO: +avg(to).toFixed(3),
+  };
+}
+
+/* [E2-2] pokrycie reżimów: ile typów reżimu występuje w ≥15% świec danych.
+   Model walidowany tylko w jednym reżimie nie jest dowodem na inne warunki. */
+export function regimeCoverageOf(candles, ind, stride = 5){
+  const counts = {};
+  let total = 0;
+  for(let i = 60; i < candles.length; i += stride){
+    const r = classifyRegime(candles, i, ind.adx.adx, ind.atr);
+    counts[r.type] = (counts[r.type] || 0) + 1;
+    total++;
+  }
+  if(!total) return 0;
+  let cov = 0;
+  for(const k in counts){ if(counts[k] / total >= 0.15) cov++; }
+  return cov;
+}
+
+/* ================= WALK-FORWARD K-FOLD =================
+   Test na ostatnich 50% danych podzielonych na K foldów; dla foldu j wagi
+   trenowane WYŁĄCZNIE na próbkach zamkniętych przed jego startem (embargo K1).
+   [A1] KALIBRACJA PRODUKCYJNA WYŁĄCZNIE Z POOLED OOS: isotonic fitowana na
+   parach (p, y) zebranych z przebiegów foldowych OUT-OF-SAMPLE — nigdy z
+   przebiegu in-sample (tam isotonic dopasowuje się do szumu i zawyża P(win),
+   fałszując bramkę EV i Kelly'ego).
+   opts: { k=4, timeBudgetMs=20000 } (E2-4: twardy budżet czasu).           */
+export function walkForwardKFold(candles, ind, emaData, hasVol, sym, minScore, smcCfg, tfId, opts = {}){
+  const t0 = Date.now();
+  const K = opts.k || 4;
+  const timeBudgetMs = opts.timeBudgetMs != null ? opts.timeBudgetMs : 20000;
+  const overBudget = () => (Date.now() - t0) > timeBudgetMs;
   const n = candles.length;
   if(n < 250) return { ok:false, reason:'za mało danych (min 250 świec)' };
-  const split = Math.floor(n * 0.6);
-  const base = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { tfId });
-  const trainSamples = base.samples.filter(s => (s.i1 != null ? s.i1 : s.i0) < split); // embargo
-  const tr = trainLogistic(trainSamples, { epochs: 500 });
-  if(!tr.trained) return { ok:false, reason: tr.reason, weights: tr.weights };
 
-  /* kalibracja: przelicz backtest z wyuczonymi wagami, weź predykcje z części
-     treningowej (zamknięte przed splitem) i dopasuj isotonic */
-  const withW = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, tfId });
-  const calPairs = withW.trades
-    .filter(t => t.i1 < split && (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
-    .map(t => ({ p: t.prob, y: t.out === 'TP1' ? 1 : 0 }));
-  const calib = fitIsotonic(calPairs, 150); // null gdy < 150 — nie kalibrujemy szumem
+  const ablate = opts.ablate || null; // [E2-1] konfiguracja ablacyjna dla całego przebiegu
+  const base = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { tfId, ablate });
+  if(overBudget()) return { ok:false, reason:'przekroczono budżet czasu' };
 
-  /* finalny przebieg: wagi + kalibracja (jeśli jest) — OOS liczony z tego */
-  const finalRun = calib
-    ? backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, calib, tfId })
-    : withW;
-  const oosTrades = finalRun.trades.filter(t => t.i0 >= split);
-  const isTrades  = finalRun.trades.filter(t => t.i1 < split);
-  const oosPairs = oosTrades
-    .filter(t => (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
-    .map(t => ({ p: t.prob, y: t.out === 'TP1' ? 1 : 0 }));
+  const testStart = Math.floor(n * 0.5);
+  const foldLen = Math.floor((n - testStart) / K);
+  const pooledOosPairs = [];
+  const pooledOosTrades = [];
+  const folds = [];
+  for(let j = 0; j < K; j++){
+    if(overBudget()) return { ok:false, reason:'przekroczono budżet czasu' };
+    const split = testStart + j * foldLen;
+    const end = (j === K - 1) ? n : split + foldLen;
+    /* embargo: tylko próbki ZAMKNIĘTE przed splitem (i1 < split) */
+    const trainSamples = base.samples.filter(s => (s.i1 != null ? s.i1 : s.i0) < split);
+    const tr = trainLogistic(trainSamples, { epochs: 400 });
+    if(!tr.trained){ folds.push({ split, end, skipped:true, reason: tr.reason }); continue; }
+    const run = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: tr.weights, tfId, ablate });
+    const oosTrades = run.trades.filter(t => t.i0 >= split && t.i0 < end);
+    const oosPairs = oosTrades
+      .filter(t => (t.out === 'TP1' || t.out === 'SL') && t.prob != null)
+      .map(t => ({ p: t.prob, y: t.out === 'TP1' ? 1 : 0 }));
+    pooledOosPairs.push(...oosPairs);
+    pooledOosTrades.push(...oosTrades);
+    folds.push({ split, end, nTrain: trainSamples.length, stats: statsOf(oosTrades), brier: brierScore(oosPairs) });
+  }
+
+  const used = folds.filter(f => !f.skipped && f.stats && f.stats.n > 0);
+  const agg = {
+    avgR:    { med: quantile(used.map(f => f.stats.avgR), 0.5), p25: quantile(used.map(f => f.stats.avgR), 0.25) },
+    pf:      { med: quantile(used.map(f => f.stats.pf), 0.5) },
+    winRate: { med: quantile(used.map(f => f.stats.winRate), 0.5) },
+    brier:   { med: quantile(folds.filter(f => f.brier != null).map(f => f.brier), 0.5),
+               p75: quantile(folds.filter(f => f.brier != null).map(f => f.brier), 0.75) },
+  };
+
+  /* wagi produkcyjne: trening na wszystkich zamkniętych próbkach */
+  const trProd = trainLogistic(base.samples, { epochs: 500 });
+  if(!trProd.trained) return {
+    ok:false, reason: trProd.reason, weights: trProd.weights,
+    samplesCollected: base.samples.length, samplesNeeded: 30, // [FIX] diagnostyka podaży etykiet
+    tradesN: base.trades.length,
+  };
+  if(overBudget()) return { ok:false, reason:'przekroczono budżet czasu' };
+  const prodRun = backtestEngine(candles, ind, emaData, hasVol, sym, minScore, smcCfg, { weights: trProd.weights, tfId, ablate });
+  const prodInSample = statsOf(prodRun.trades); // WYŁĄCZNIE diagnostyka — nie do decyzji
+
+  /* [A1] kalibracja produkcyjna TYLKO z pooled OOS (null gdy < 150 par) */
+  const prodCalib = fitIsotonic(pooledOosPairs, 150);
+  const payout = computePayout(pooledOosTrades);
+  const totalNoos = pooledOosTrades.length;
+  const regimeCoverage = regimeCoverageOf(candles, ind);
+
+  const verdict = reliableVerdict({ totalNoos, agg, regimeCoverage });
 
   return {
-    ok:true, split, weights: tr.weights, calib, training: tr,
-    inSample: statsOf(isTrades), outSample: statsOf(oosTrades), baseline: base.stats,
-    oosBrier: brierScore(oosPairs),      // < 0.25 = lepiej niż moneta
-    reliable: tr.reliable && oosTrades.length >= 30,
-    samples: trainSamples.map(s => ({ x: s.x, y: s.y })), // historia dla kNN (część treningowa, z embargo)
+    ok:true, weights: trProd.weights, calib: prodCalib, training: trProd,
+    folds, agg, totalNoos, oosPairsN: pooledOosPairs.length,
+    payout, prodInSample, regimeCoverage,
+    reliable: verdict.reliable, reliableWhy: verdict.failed,
+    samples: base.samples.map(s => ({ x: s.x, y: s.y })), // historia dla kNN (diagnostyka)
   };
+}
+
+/* [E2-2/A8] Zaostrzony próg wiarygodności modelu. Wszystkie warunki naraz:
+   ≥200 transakcji OOS, mediana avgR > 0, p25 avgR > −0.05 (żaden fold nie
+   może tonąć), Brier p75 < 0.25 (lepiej niż moneta w ≥3/4 foldów),
+   pokrycie ≥2 reżimów (model widziany w więcej niż jednych warunkach). */
+export function reliableVerdict({ totalNoos, agg, regimeCoverage }){
+  const checks = [
+    ['n_oos ≥ 200', totalNoos >= 200],
+    ['med(avgR) > 0', (agg && agg.avgR && agg.avgR.med != null) && agg.avgR.med > 0],
+    ['p25(avgR) > −0.05', (agg && agg.avgR && agg.avgR.p25 != null) && agg.avgR.p25 > -0.05],
+    ['Brier p75 < 0.25', (agg && agg.brier && agg.brier.p75 != null) && agg.brier.p75 < 0.25],
+    ['pokrycie reżimów ≥ 2', regimeCoverage >= 2],
+  ];
+  const failed = checks.filter(c => !c[1]).map(c => c[0]);
+  return { reliable: failed.length === 0, failed };
 }

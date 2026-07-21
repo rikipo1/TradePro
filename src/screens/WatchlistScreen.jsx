@@ -5,6 +5,7 @@ import { Sparkline } from '../components/Sparkline.jsx';
 import { Bus } from '../core/bus.js';
 import { Net } from '../core/net.js';
 import { fetchQuotes, getChart } from '../data/feed.js';
+import { CAP_MAP, capEnabled, capitalTick } from '../data/capital.js';
 import { fmtClock, fmtPct, fmtPrice } from '../utils/format.js';
 import { notifyUser } from '../utils/notify.js';
 
@@ -52,6 +53,26 @@ export function WatchlistScreen({ wl, setWl, openChart, prefs, setPrefs }){
         }catch(e){
           out[it.sym] = { err: e.message || 'błąd' };
         }
+      }));
+    }
+    /* [FIX] LIVE Capital.com: nadpisz cenę/zmianę tickiem brokera dla
+       instrumentów z CAP_MAP (sparkline zostaje z Yahoo — tick nie daje świec).
+       Bez tego lista RYNKI pokazywała opóźnione Yahoo mimo włączonego LIVE. */
+    if(capEnabled()){
+      await Promise.all(wl.map(async it => {
+        if(!CAP_MAP[it.sym]) return;
+        try{
+          const t = await capitalTick(it.sym);
+          if(t && t.px != null && out[it.sym] && !out[it.sym].err){
+            const prev = (t.net != null) ? t.px - t.net : null;
+            out[it.sym] = {
+              ...out[it.sym],
+              price: t.px,
+              pct: (t.net != null && prev) ? t.net / prev * 100 : out[it.sym].pct,
+              live: true,
+            };
+          }
+        }catch(e){}
       }));
     }
     if(!aliveRef.current) return;
@@ -120,7 +141,7 @@ export function WatchlistScreen({ wl, setWl, openChart, prefs, setPrefs }){
                 {q.err
                   ? <div style={{fontSize:11, color:'var(--down)', textAlign:'right'}}>brak danych</div>
                   : <React.Fragment>
-                      <div className="wl-price mono">{fmtPrice(q.price)}</div>
+                      <div className="wl-price mono">{q.live ? <span style={{color:'var(--up)', fontSize:9, verticalAlign:'middle', marginRight:3}}>●</span> : null}{fmtPrice(q.price)}</div>
                       <div style={{textAlign:'right'}}>
                         <span className={'wl-chip mono ' + (q.pct == null ? 'chip-flat' : up ? 'chip-up' : 'chip-down')}>
                           {fmtPct(q.pct)}
@@ -139,8 +160,9 @@ export function WatchlistScreen({ wl, setWl, openChart, prefs, setPrefs }){
       </div>
 
       <div style={{padding:'14px 16px 20px', fontSize:11, color:'var(--dim2)', lineHeight:1.6}}>
-        Dane: Yahoo Finance (indeksy kasowe). DAX ≈ DE40, Dow Jones ≈ US30 —
-        notowania CFD w XTB mogą się minimalnie różnić.
+        Dane: Yahoo Finance (indeksy kasowe), a przy włączonym LIVE — realtime
+        z Capital.com (● zielona kropka) dla obsługiwanych instrumentów.
+        DAX ≈ DE40, Dow Jones ≈ US30 — notowania CFD w XTB mogą się minimalnie różnić.
       </div>
 
       {showAdd && (

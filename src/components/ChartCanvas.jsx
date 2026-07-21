@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { EMA_DEFS } from '../indicators/index.js';
 import { CLR, COUNT0, clampEnd, fmtFull, fmtPct, fmtPrice, fmtTime, fmtVol, niceStep } from '../utils/format.js';
 
-export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, overlays, panels, markers, geoLines, patMap, focus, levels }){
+export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, overlays, panels, markers, geoLines, patMap, focus, levels, posMarkers }){
   const wrapRef = useRef(null);
   const cvsRef  = useRef(null);
   const layoutRef = useRef(null);
@@ -21,7 +21,9 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
   }, []);
   useEffect(() => () => { if(rafRef.current.id) cancelAnimationFrame(rafRef.current.id); }, []);
   const [size, setSize] = useState({ w:0, h:0 });
-  const [view, setView] = useState({ count:COUNT0, end:COUNT0-1 });
+  /* view: count/end = okno CZASU; yLo/yHi = ręczne okno CENY (null = auto-fit).
+     Ręczne okno pozwala przesuwać wykres w GÓRĘ/DÓŁ (pan pionowy). */
+  const [view, setView] = useState({ count:COUNT0, end:COUNT0-1, yLo:null, yHi:null });
   const [cross, setCross] = useState(null);
   const len = candles.length;
   const ovl = overlays || {};
@@ -31,7 +33,7 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
   useEffect(() => {
     pinnedRef.current = true;
     setCross(null);
-    setView({ count:COUNT0, end:COUNT0-1 });
+    setView({ count:COUNT0, end:COUNT0-1, yLo:null, yHi:null });
   }, [resetKey]);
 
   /* --- fokus z listy formacji: ustaw krzyżyk i dosuń widok --- */
@@ -83,12 +85,34 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
     try{ cvsRef.current.setPointerCapture(e.pointerId); }catch(err){}
     g.pts.set(e.pointerId, { x:e.clientX, y:e.clientY });
     if(g.pts.size === 1){
-      g.mode = 'pan'; g.sx = e.clientX; g.sEnd = view.end;
-      g.moved = false; g.t0 = Date.now();
+      const L = layoutRef.current;
+      const rect = cvsRef.current ? cvsRef.current.getBoundingClientRect() : { left:0 };
+      const localX = e.clientX - rect.left;
+      const onPriceAxis = L && localX >= (L.plotL + L.plotW) - 6; // pasek ceny (prawa oś)
+      if(onPriceAxis){
+        /* ZOOM CENY na pasku ceny — nie miesza się ze zwykłym zoomem (pinch) */
+        g.mode = 'yzoom'; g.sy = e.clientY; g.moved = false; g.t0 = Date.now();
+        g.syLo = view.yLo != null ? view.yLo : L.lo;
+        g.syHi = view.yHi != null ? view.yHi : L.hi;
+        g.syRange = (g.syHi - g.syLo) || L.range || 1;
+        g.syMid = (g.syLo + g.syHi) / 2;
+      } else {
+        g.mode = 'pan'; g.sx = e.clientX; g.sEnd = view.end;
+        g.sy = e.clientY; g.moved = false; g.t0 = Date.now();
+        /* start okna CENY do pan pionowego (z ostatniego rysowania) */
+        g.yEngaged = (view.yLo != null && view.yHi != null);
+        if(L){
+          g.syLo = view.yLo != null ? view.yLo : L.lo;
+          g.syHi = view.yHi != null ? view.yHi : L.hi;
+          g.syRange = (g.syHi - g.syLo) || L.range || 1;
+          g.syPriceH = L.priceH || 1;
+        }
+      }
     } else if(g.pts.size === 2){
       const p = Array.from(g.pts.values());
       g.mode = 'pinch';
-      g.sDist = Math.max(8, Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y));
+      /* pinch = ZWYKŁY ZOOM (czas). Oś ceny zoomuje się osobno na pasku ceny. */
+      g.sDistX = Math.max(12, Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y));
       g.sCount = view.count;
       g.sCenter = view.end - view.count/2;
     }
@@ -104,18 +128,44 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
     if(!L || !len) return;
     if(g.mode === 'pan' && g.pts.size === 1){
       const dx = e.clientX - g.sx;
-      if(Math.abs(dx) > 5) g.moved = true;
+      const dy = e.clientY - g.sy;
+      if(Math.abs(dx) > 5 || Math.abs(dy) > 5) g.moved = true;
       const newEnd = clampEnd(g.sEnd - dx / L.cw, view.count, len);
       pinnedRef.current = newEnd >= len - 1.5;
-      scheduleView(v => ({ ...v, end:newEnd }));
+      /* pan PIONOWY (cena): włącza się po przekroczeniu progu, żeby czysty
+         ruch poziomy nie zamrażał auto-dopasowania osi */
+      let yPatch = null;
+      if(!g.yEngaged && Math.abs(dy) > 8){
+        g.yEngaged = true; g.sy = e.clientY;
+        g.syLo = view.yLo != null ? view.yLo : L.lo;
+        g.syHi = view.yHi != null ? view.yHi : L.hi;
+        g.syRange = (g.syHi - g.syLo) || L.range || 1;
+        g.syPriceH = L.priceH || 1;
+      }
+      if(g.yEngaged){
+        const dp = (e.clientY - g.sy) / g.syPriceH * g.syRange; // przesuń okno ceny
+        yPatch = { yLo: g.syLo + dp, yHi: g.syHi + dp };
+      }
+      scheduleView(v => ({ ...v, end:newEnd, ...(yPatch || {}) }));
+    } else if(g.mode === 'yzoom' && g.pts.size === 1){
+      /* ZOOM OSI CENY (przeciąganie po pasku ceny): w dół = oddal (większy
+         zakres), w górę = przybliż (mniejszy zakres). Środek okna nieruchomy. */
+      const dy = e.clientY - g.sy;
+      if(Math.abs(dy) > 3) g.moved = true;
+      let factor = Math.exp(dy / 160);
+      factor = Math.max(0.15, Math.min(8, factor));
+      const newRange = g.syRange * factor;
+      const newLo = g.syMid - newRange / 2, newHi = g.syMid + newRange / 2;
+      if(isFinite(newLo) && newHi > newLo) scheduleView(v => ({ ...v, yLo:newLo, yHi:newHi }));
     } else if(g.mode === 'pinch' && g.pts.size >= 2){
       const p = Array.from(g.pts.values());
-      const d = Math.max(8, Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y));
-      let nc = Math.round(g.sCount * (g.sDist / d));
+      const d = Math.max(12, Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y));
+      /* zwykły zoom (czas) */
+      let nc = Math.round(g.sCount * (g.sDistX / d));
       nc = Math.max(15, Math.min(400, nc));
       const ne = clampEnd(g.sCenter + nc/2, nc, len);
       pinnedRef.current = ne >= len - 1.5;
-      scheduleView({ count:nc, end:ne });
+      scheduleView(v => ({ ...v, count:nc, end:ne }));
     }
   };
   const onPointerUp = (e) => {
@@ -129,6 +179,15 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
     if(g.pts.size === 1 && g.mode === 'pinch'){
       const rest = Array.from(g.pts.values())[0];
       g.mode = 'pan'; g.sx = rest.x; g.sEnd = view.end; g.moved = true; g.t0 = 0;
+      /* wznów bazę pan pionowego od bieżącego palca (bez skoku) */
+      g.sy = rest.y;
+      const L = layoutRef.current;
+      if(L){
+        g.syLo = view.yLo != null ? view.yLo : L.lo;
+        g.syHi = view.yHi != null ? view.yHi : L.hi;
+        g.syRange = (g.syHi - g.syLo) || L.range || 1;
+        g.syPriceH = L.priceH || 1;
+      }
     } else if(g.pts.size === 0){
       g.mode = null;
     }
@@ -154,12 +213,12 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
         const cw2 = L.plotW / nc;
         const ne = clampEnd(idxAt + 0.5 - (x - L.plotL)/cw2 + nc - 1, nc, len);
         pinnedRef.current = ne >= len - 1.5;
-        return { count:nc, end:ne };
+        return { ...v, count:nc, end:ne };
       });
     };
     const onDbl = () => {
       pinnedRef.current = true;
-      setView({ count:COUNT0, end: len ? len-1+COUNT0*0.08 : COUNT0-1 });
+      setView({ count:COUNT0, end: len ? len-1+COUNT0*0.08 : COUNT0-1, yLo:null, yHi:null });
     };
     cvs.addEventListener('wheel', onWheel, { passive:false });
     cvs.addEventListener('dblclick', onDbl);
@@ -217,6 +276,10 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
     let pad = (hi - lo) * 0.07;
     if(pad <= 0) pad = Math.max(Math.abs(hi) * 0.002, 0.5);
     lo -= pad; hi += pad;
+    /* ręczne okno CENY (pan pionowy) nadpisuje auto-dopasowanie */
+    if(view.yLo != null && view.yHi != null && view.yHi > view.yLo){
+      lo = view.yLo; hi = view.yHi;
+    }
     const range = hi - lo;
 
     /* osie / layout */
@@ -251,7 +314,7 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
     const X = (i) => plotL + (i - start) * cw + cw/2;
     const Y = (p) => priceTop + (hi - p) / range * priceH;
 
-    layoutRef.current = { start, cw, plotL, plotW };
+    layoutRef.current = { start, cw, plotL, plotW, lo, hi, range, priceH, priceTop };
 
     /* siatka pozioma + etykiety cen */
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
@@ -262,6 +325,13 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
       ctx.fillStyle = CLR.axis;
       ctx.fillText(v.toFixed(dec), plotR + 7, y);
     }
+    /* wskazówka: pasek ceny można chwycić i skalować (⇕) */
+    ctx.fillStyle = view.yLo != null ? 'rgba(199,146,255,.8)' : 'rgba(143,176,172,.4)';
+    ctx.font = '11px JetBrains Mono, monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText('⇕', plotR + (axisW / 2), priceTop + 2);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.font = '10px JetBrains Mono, monospace';
 
     /* siatka pionowa + etykiety czasu */
     const tStep = Math.max(1, Math.round(count / 5));
@@ -537,6 +607,48 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
       ctx.restore();
     }
 
+    /* --- ZNACZNIK WEJŚCIA W POZYCJĘ (otwarte pozycje paper na tym symbolu) --- */
+    if(posMarkers && posMarkers.length){
+      ctx.save();
+      ctx.beginPath(); ctx.rect(plotL, 0, plotW, bottomAll); ctx.clip();
+      for(let m=0;m<posMarkers.length;m++){
+        const pm = posMarkers[m];
+        /* znajdź świecę wejścia po czasie (pm.t w sekundach) */
+        let ei = -1;
+        for(let q=iFrom;q<=iTo;q++){ if(candles[q].t >= pm.t){ ei = q; break; } }
+        const offRight = ei < 0 && pm.t > candles[iTo].t; // wejście świeższe niż widok
+        const x = ei >= 0 ? X(ei) : (offRight ? plotR - 2 : plotL + 2);
+        const col = pm.dir > 0 ? CLR.up : CLR.down;
+        /* pionowa linia wejścia */
+        ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.globalAlpha = 0.55;
+        ctx.setLineDash([2,3]);
+        ctx.beginPath(); ctx.moveTo(x, priceTop); ctx.lineTo(x, bottomAll); ctx.stroke();
+        ctx.setLineDash([]); ctx.globalAlpha = 1;
+        /* trójkąt + etykieta na poziomie wejścia (jeśli w zakresie ceny) */
+        const py = (pm.price >= lo && pm.price <= hi) ? Y(pm.price) : (pm.dir > 0 ? bottomAll - 12 : priceTop + 12);
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        if(pm.dir > 0){ ctx.moveTo(x, py + 9); ctx.lineTo(x - 5, py + 16); ctx.lineTo(x + 5, py + 16); }
+        else { ctx.moveTo(x, py - 9); ctx.lineTo(x - 5, py - 16); ctx.lineTo(x + 5, py - 16); }
+        ctx.closePath(); ctx.fill();
+        /* etykieta „▶ WEJŚCIE HH:MM" nad/pod trójkątem */
+        const lbl = '▶ ' + (pm.dir > 0 ? 'LONG' : 'SHORT') + (pm.label ? ' ' + pm.label : '');
+        ctx.font = '9px JetBrains Mono, monospace';
+        const lw = ctx.measureText(lbl).width;
+        let bx = x - lw/2 - 5;
+        if(bx < plotL + 2) bx = plotL + 2;
+        if(bx + lw + 10 > plotR) bx = plotR - lw - 10;
+        const by = pm.dir > 0 ? py + 18 : py - 32;
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        if(ctx.roundRect) ctx.roundRect(bx, by, lw + 10, 14, 4); else ctx.rect(bx, by, lw + 10, 14);
+        ctx.fill();
+        ctx.fillStyle = '#04181d'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(lbl, bx + 5, by + 7);
+      }
+      ctx.restore();
+    }
+
     /* krzyżyk (crosshair) */
     if(cross != null && cross >= iFrom && cross <= iTo){
       const c = candles[cross];
@@ -556,7 +668,7 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
       ctx.fillStyle = CLR.txt; ctx.textAlign = 'left';
       ctx.fillText(txt, plotR + 8, y);
     }
-  }, [candles, view, cross, emaVis, size, tfId, hasVol, len, overlays, panels, markers, geoLines, levels]);
+  }, [candles, view, cross, emaVis, size, tfId, hasVol, len, overlays, panels, markers, geoLines, levels, posMarkers]);
 
   /* --- panel OHLC dla krzyżyka --- */
   const cc = (cross != null && cross < len) ? candles[cross] : null;
@@ -625,6 +737,10 @@ export function ChartCanvas({ candles, emaData, emaVis, tfId, resetKey, hasVol, 
           pinnedRef.current = true;
           setView(v => ({ ...v, end: len - 1 + v.count * 0.08 }));
         }}>⇥ Teraz</button>
+      )}
+      {view.yLo != null && (
+        <button className="resetview mono" style={{bottom: showReset ? 72 : 34}}
+          onClick={() => setView(v => ({ ...v, yLo:null, yHi:null }))}>⇕ auto</button>
       )}
     </div>
   );

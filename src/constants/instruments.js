@@ -14,11 +14,13 @@ export function spreadPx(sym, price){ return instrCost(sym).spr * price * 2; }
 /* --- profile per instrument: dynamiczne parametry decyzji ---
    klasa: index | gold | crypto | fx. Steruje: bufor SL (×ATR), min RR,
    wrażliwość na filtr sesji, czy honorować okna makro, czy jest 24/7. */
+/* [E3-3] slipAtr: poślizg wyjścia na SL w ułamku ATR (tylko backtest —
+   fill SL po slCur − dir·slip; model pesymistyczny) */
 const CLASS_DEFAULTS = {
-  index:  { slWick:0.18, minRR:1.6, sessionSensitive:true,  h24:false, macro:true  },
-  gold:   { slWick:0.28, minRR:1.7, sessionSensitive:true,  h24:false, macro:true  },
-  crypto: { slWick:0.35, minRR:1.8, sessionSensitive:false, h24:true,  macro:false },
-  fx:     { slWick:0.15, minRR:1.6, sessionSensitive:true,  h24:false, macro:true  },
+  index:  { slWick:0.18, minRR:1.6, sessionSensitive:true,  h24:false, macro:true,  slipAtr:0.10 },
+  gold:   { slWick:0.28, minRR:1.7, sessionSensitive:true,  h24:false, macro:true,  slipAtr:0.15 },
+  crypto: { slWick:0.35, minRR:1.8, sessionSensitive:false, h24:true,  macro:false, slipAtr:0.20 },
+  fx:     { slWick:0.15, minRR:1.6, sessionSensitive:true,  h24:false, macro:true,  slipAtr:0.05 },
 };
 const SYM_CLASS = {
   '^GDAXI':'index', '^DJI':'index', '^GSPC':'index', '^IXIC':'index',

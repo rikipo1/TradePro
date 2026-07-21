@@ -122,13 +122,29 @@
     text-align:left; flex-shrink:0; transition:transform .1s ease;
   }
   .sigstrip:active{transform:scale(.985)}
-  .sig-dir{font-weight:900; font-size:15px; letter-spacing:.5px; min-width:66px}
-  .sgauge{flex:1; height:7px; border-radius:4px; background:rgba(159,226,214,.10); overflow:hidden; position:relative}
-  .sgauge i{position:absolute; top:0; bottom:0; left:0; border-radius:4px}
-  .sig-meta{font-size:10.5px; text-align:right; line-height:1.5; white-space:nowrap}
+  .sig-dir{font-weight:900; font-size:15px; letter-spacing:.5px; min-width:66px; flex-shrink:0}
+  .sgauge{flex:1; height:7px; border-radius:4px; background:rgba(159,226,214,.10); overflow:hidden; position:relative; min-width:0}
+  .sgauge i{position:absolute; top:0; bottom:0; left:0; border-radius:4px; transition:width .3s ease}
+  .sig-meta{font-size:10.5px; text-align:right; line-height:1.5; white-space:nowrap; min-width:0; overflow:hidden; text-overflow:ellipsis}
+
+  /* ---------- pasek gotowości setupu (readiness) ---------- */
+  .readybar{height:6px; border-radius:4px; background:rgba(159,226,214,.10); overflow:hidden; position:relative; flex:1; min-width:0}
+  .readybar i{position:absolute; top:0; bottom:0; left:0; border-radius:4px; transition:width .35s ease, background .35s ease}
+  /* ---------- pasek strategii (🏛 ranking) — układ kolumnowy, bez ucięć ---------- */
+  .stratstrip{
+    margin:6px 16px 2px; padding:9px 12px; border-radius:13px; width:calc(100% - 32px);
+    display:flex; flex-direction:column; gap:7px; flex-shrink:0;
+    border:1px solid var(--border2); background:var(--panel); text-align:left;
+    transition:transform .1s ease;
+  }
+  .stratstrip:active{transform:scale(.99)}
+  .stratbtn{
+    padding:9px 14px; border-radius:10px; border:none; font-weight:900; font-size:13px;
+    white-space:nowrap; flex-shrink:0; letter-spacing:.3px; cursor:pointer;
+  }
 
   /* ---------- modal ---------- */
-  .modal-bg{position:fixed;inset:0;background:rgba(2,12,15,.78);z-index:50;display:flex;align-items:flex-end;justify-content:center;backdrop-filter:blur(3px)}
+  .modal-bg{position:fixed;inset:0;background:rgba(2,12,15,.78);z-index:300;display:flex;align-items:flex-end;justify-content:center;backdrop-filter:blur(3px)}
   .modal{
     width:100%;max-width:560px;max-height:82vh;display:flex;flex-direction:column;
     background:var(--panel);border:1px solid var(--border2);border-bottom:none;
@@ -171,8 +187,49 @@
 
   .toast{
     position:fixed;left:50%;transform:translateX(-50%);
-    bottom:calc(env(safe-area-inset-bottom,0px) + 76px);z-index:99;
+    bottom:calc(env(safe-area-inset-bottom,0px) + 76px);z-index:250;
     background:var(--panel3);border:1px solid var(--border2);color:var(--text);
     padding:10px 16px;border-radius:12px;font-size:13px;font-weight:600;
     max-width:88%;animation:fadeUp .2s ease;box-shadow:0 6px 24px rgba(0,0,0,.4);
+  }
+
+  /* ================= AUTO-DOPASOWANIE DO EKRANU URZĄDZENIA ================= */
+  /* tablety / duże ekrany: wyśrodkuj aplikację (nie rozciągaj na całą szerokość) */
+  @media (min-width: 700px){
+    .app{ max-width:820px; margin:0 auto; border-left:1px solid var(--border); border-right:1px solid var(--border); }
+    .toast{ max-width:560px; }
+  }
+  /* małe telefony: ciaśniejsze marginesy, mniejszy font — więcej treści na ekranie */
+  @media (max-width: 360px){
+    body{ font-size:14px; }
+    .topbar{ gap:7px; padding-left:11px; padding-right:11px; }
+    .chiprow{ gap:6px; padding-left:11px; padding-right:11px; }
+    .pricehero{ padding-left:12px; padding-right:12px; }
+    .ph-price{ font-size:29px; }
+    .sigstrip, .stratstrip{ margin-left:11px; margin-right:11px; width:calc(100% - 22px); }
+    .wl-row{ padding-left:12px; padding-right:12px; gap:9px; }
+    .iconbtn{ width:34px; height:34px; }
+  }
+  /* bardzo wąskie (≤330px, stare/małe telefony) */
+  @media (max-width: 330px){
+    .ph-price{ font-size:25px; }
+    .chip{ padding:5px 10px; font-size:11.5px; }
+  }
+  /* krótkie okna (split-screen, landscape) — oszczędzaj pion, wykres dostaje więcej */
+  @media (max-height: 560px){
+    .topbar{ padding-top:calc(env(safe-area-inset-top,0px) + 7px); padding-bottom:6px; }
+    .pricehero{ padding-top:2px; padding-bottom:4px; }
+    .ph-price{ font-size:24px; line-height:1.05; }
+    .chartwrap{ min-height:200px; }
+    .chiprow{ padding-top:5px; padding-bottom:5px; }
+  }
+  /* bardzo niskie (mały pływający/split) — jeszcze ciaśniej */
+  @media (max-height: 430px){
+    .ph-price{ font-size:20px; }
+    .chartwrap{ min-height:160px; }
+  }
+
+  /* boks OHLC (krzyżyk) mniejszy w poziomie / pełnym ekranie — nie zasłania świec */
+  @media (orientation: landscape) and (max-height: 620px){
+    .ohlcbox{ font-size:9.5px; line-height:1.45; padding:5px 8px; max-width:52%; top:6px; left:6px; }
   }

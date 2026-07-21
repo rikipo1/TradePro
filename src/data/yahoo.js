@@ -9,6 +9,12 @@ export const TFS = [
   { id:'D1',  interval:'1d',  range:'1y',  label:'D1'  },
 ];
 
+/* Maksymalny zakres historii Yahoo per interwał — używany WYŁĄCZNIE do treningu
+   i backtestu (nie do widoku wykresu). Limity Yahoo: 1m→7d, śróddzienne→60d,
+   60m→730d, D1→max. Bez tego M5 miał tylko 5 dni ≈ 460 świec i training padał
+   na „za mało próbek". */
+export const TF_MAX_RANGE = { M1:'7d', M5:'60d', M15:'60d', M30:'60d', H1:'730d', D1:'10y' };
+
 export async function yahooChart(symbol, tf){
   const url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(symbol)
     + '?interval=' + tf.interval + '&range=' + tf.range + '&includePrePost=false';

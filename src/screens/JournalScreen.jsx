@@ -5,11 +5,40 @@ import { Bus } from '../core/bus.js';
 import { CAP_MAP, capEnabled, capitalTick } from '../data/capital.js';
 import { fetchQuotes } from '../data/feed.js';
 import { paperFloating } from '../data/paper.js';
+import { riskStatus } from '../signals/riskEngine.js';
+import { rollingStats, degradation } from '../signals/monitor.js';
+import { Store } from '../core/store.js';
+import { compareShadow } from '../backtest/shadow.js';
+import { backtestEngine } from '../backtest/engine.js';
+import { indicatorsFor } from '../signals/engine.js';
+import { getChart } from '../data/feed.js';
+import { TFS } from '../data/yahoo.js';
 import { fmtPrice, pad2 } from '../utils/format.js';
+
+/* nazwa instrumentu do wyświetlenia: preferuj czytelną nazwę Capital.com
+   (US100, US500, GERMANY40, GOLD…) zamiast surowego symbolu Yahoo (^IXIC…) */
+export function prettySym(sym){
+  return (sym && CAP_MAP[sym]) ? CAP_MAP[sym] : sym;
+}
 
 export function fmtDT(ts){
   const d = new Date(ts);
   return pad2(d.getDate()) + '.' + pad2(d.getMonth()+1) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+}
+export function fmtHMS(ts){
+  const d = new Date(ts);
+  return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+}
+/* czas trwania pozycji w rynku (czasówka) */
+export function fmtDur(ms){
+  if(ms == null || ms < 0) return '—';
+  const m = Math.round(ms / 60000);
+  if(m < 1) return '<1 min';
+  if(m < 60) return m + ' min';
+  const h = Math.floor(m / 60), mm = m % 60;
+  if(h < 24) return h + 'h' + (mm ? ' ' + mm + 'm' : '');
+  const d = Math.floor(h / 24);
+  return d + 'd ' + (h % 24) + 'h';
 }
 export const RESULT_DEF = [
   ['tp2', 'TP2',  2.5, 'var(--up)'],
@@ -28,6 +57,7 @@ export function JournalScreen({ journal, setJournal }){
   const [q, setQ] = useState({});
   const [busyPx, setBusyPx] = useState(false);
   const [expanded, setExpanded] = useState(null);
+  const [shadow, setShadow] = useState({ busy:false, res:null, combo:null }); // [E3-2]
 
   /* statystyki tylko z ROZSTRZYGNIĘTYCH transakcji — pending/cancelled
      (zlecenia limit) nie są transakcjami i nie mogą zaniżać średnich */
@@ -69,15 +99,25 @@ export function JournalScreen({ journal, setJournal }){
   };
   const closeEntry = (id, key) => {
     const rd = resultOf(key);
-    setJournal(list => list.map(e => e.id === id
-      ? { ...e, result:key, r: (key === 'tp1' && e.rr1) ? e.rr1 : rd[2] }
-      : e));
+    /* [FIX] zapisz CZAS i CENĘ wyjścia — bez tego marker zamknięcia się nie
+       pokazywał, a Risk Engine (doba UTC) używał czasu otwarcia zamiast wyjścia */
+    setJournal(list => list.map(e => {
+      if(e.id !== id) return e;
+      const exitPx = key === 'sl' ? e.sl : key === 'tp1' ? e.tp1 : key === 'tp2' ? e.tp2 : e.entry;
+      return {
+        ...e, result:key,
+        r: (key === 'tp1' && e.rr1) ? e.rr1 : rd[2],
+        exit: exitPx != null ? exitPx : (e.exit != null ? e.exit : null),
+        exitTs: Date.now(),
+      };
+    }));
     setPick(null);
   };
   const addManual = () => {
     const rd = resultOf(mRes);
+    const now = Date.now();
     setJournal(list => [{
-      id: Date.now(), ts: Date.now(), sym: (mSym || '—').toUpperCase(), tf: '—',
+      id: now, ts: now, exitTs: now, sym: (mSym || '—').toUpperCase(), tf: '—',
       dir: mDir, result: mRes, r: rd[2], note: mNote.trim(), src: 'manual',
     }, ...list]);
     setShowAdd(false);
@@ -94,7 +134,7 @@ export function JournalScreen({ journal, setJournal }){
           const esc = s => { const v = String(s == null ? '' : s); return /[",;\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
           const head = ['data','symbol','tf','kierunek','wejscie','SL','TP1','TP2','wynik','R','zrodlo','notatka'];
           const rows = journal.map(e => [
-            fmtDT(e.ts), e.sym, e.tf || '', e.dir > 0 ? 'LONG' : 'SHORT',
+            fmtDT(e.ts), prettySym(e.sym), e.tf || '', e.dir > 0 ? 'LONG' : 'SHORT',
             e.entry != null ? e.entry : '', e.sl != null ? e.sl : '',
             e.tp1 != null ? e.tp1 : '', e.tp2 != null ? e.tp2 : '',
             e.result, e.r != null ? e.r : '', e.src || '', e.note || '',
@@ -112,6 +152,22 @@ export function JournalScreen({ journal, setJournal }){
         }}>
           <Ic d={IC.download} size={18} />
         </button>
+        <button className="iconbtn" title="Eksport JSON (tylko dziennik)" onClick={() => {
+          /* [E4-4] eksport JSON samego dziennika (komplet pól decyzyjnych) */
+          if(!journal.length){ Bus.show('Dziennik jest pusty'); return; }
+          try{
+            const json = JSON.stringify({ __app:'RikipoTrader', __type:'journal', __ver:1, __ts:new Date().toISOString(), journal }, null, 1);
+            const blob = new Blob([json], { type:'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'rikipo-dziennik.json';
+            document.body.appendChild(a); a.click();
+            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+            Bus.show('Wyeksportowano dziennik do JSON (' + journal.length + ' wpisów)');
+          }catch(err){ Bus.show('Eksport nieobsługiwany w tym środowisku'); }
+        }}>
+          <span className="mono" style={{fontSize:10, fontWeight:900}}>{'{}'}</span>
+        </button>
         <button className="iconbtn" onClick={loadPx}>
           <span className={busyPx ? 'spin' : ''} style={{display:'flex'}}><Ic d={IC.refresh} size={18} /></span>
         </button>
@@ -121,6 +177,24 @@ export function JournalScreen({ journal, setJournal }){
         <button className="iconbtn accent" onClick={() => setShowAdd(true)}><Ic d={IC.plus} size={19} /></button>
       </div>
 
+      {(() => {
+        /* [A5] status Risk Engine v2: floating z żywych cen + limit otwartych */
+        const openPaper = journal.filter(e => e.paper && e.result === 'open');
+        const floatingR = +openPaper.reduce((a, e) => { const f = paperFloating(e, q[e.sym]); return a + (f != null ? f : 0); }, 0).toFixed(2);
+        const rs = riskStatus(journal, {}, { openCount: openPaper.length, floatingR });
+        if(!rs.blocked && rs.effDailyR >= 0 && !openPaper.length) return null;
+        return (
+          <div className="card" style={{marginTop:2, borderColor: rs.blocked ? 'rgba(255,107,94,.45)' : 'var(--border)'}}>
+            <div className="kv"><b>{rs.blocked ? '\u{1F6D1} Kill-switch aktywny' : 'Ryzyko dnia (UTC)'}</b>
+              <span className="mono" style={{color: rs.effDailyR < 0 ? 'var(--down)' : 'var(--dim)'}}>
+                {rs.effDailyR}R{rs.floatingR ? ' (floating ' + (rs.floatingR > 0 ? '+' : '') + rs.floatingR + 'R)' : ''} · otwarte {openPaper.length}
+              </span>
+            </div>
+            {rs.reason && <div style={{fontSize:11.5, color:'var(--down)', paddingTop:2}}>{rs.reason} — auto-trade wstrzymany</div>}
+          </div>
+        );
+      })()}
+
       <div className="card" style={{marginTop:2}}>
         <div className="kv"><b>Zamknięte transakcje</b><span className="mono">{closed.length}{openN ? ' · ' + openN + ' w trakcie' : ''}</span></div>
         <div className="kv"><b>Trafność</b><span className="mono" style={{color: wins >= losses ? 'var(--up)' : 'var(--down)'}}>{(wins + losses) ? (wins/(wins+losses)*100).toFixed(0) + '%' : '—'}</span></div>
@@ -128,6 +202,86 @@ export function JournalScreen({ journal, setJournal }){
         <div className="kv"><b>Średnia R / trade</b><span className="mono">{closed.length ? (sumR/closed.length).toFixed(2) : '—'}</span></div>
         <div className="kv"><b>Profit factor</b><span className="mono">{grossL > 0 ? (grossW/grossL).toFixed(2) : (grossW > 0 ? '∞' : '—')}</span></div>
       </div>
+
+      {(() => {
+        /* [E3-1] Monitoring Engine: rolling stats vs walidacja k-fold */
+        const meta = Store.get('rt_model_meta', null);
+        if(!meta || !meta.sym) return null;
+        const roll = rollingStats(journal, meta.sym, meta.tf, 30);
+        const deg = degradation(roll, meta);
+        return (
+          <div className="card" style={{marginTop:2, borderColor: deg.degraded || meta.degradedAt ? 'rgba(255,201,77,.45)' : 'var(--border)'}}>
+            <div className="kv"><b>Monitoring modelu · {prettySym(meta.sym)}·{meta.tf}</b>
+              <span className="mono" style={{color: meta.reliable ? 'var(--up)' : 'var(--ema9)'}}>
+                {meta.reliable ? 'AKTYWNY' : (meta.degradedAt ? 'ZDEGRADOWANY → wagi domyślne' : 'nieaktywny')}
+              </span>
+            </div>
+            <div className="kv"><b>Rolling (ost. {roll.n})</b>
+              <span className="mono">{roll.n ? (roll.avgR + 'R · traf. ' + (roll.winRate != null ? roll.winRate + '%' : '—') + ' · PF ' + roll.pf + (roll.brierLive != null ? ' · Brier ' + roll.brierLive : '')) : 'brak zamkniętych transakcji'}</span>
+            </div>
+            {meta.agg && meta.agg.avgR && <div className="kv"><b>Walidacja k-fold</b><span className="mono" style={{color:'var(--dim2)'}}>med {meta.agg.avgR.med != null ? meta.agg.avgR.med : '—'}R · p25 {meta.agg.avgR.p25 != null ? meta.agg.avgR.p25 : '—'}R</span></div>}
+            {(deg.degraded || meta.degradedWhy) && (
+              <div style={{fontSize:11.5, color:'var(--ema9)', paddingTop:2, lineHeight:1.5}}>
+                ⚠ {((deg.degraded ? deg.reasons : meta.degradedWhy) || []).join(' · ')} — model przełączony na wagi domyślne do czasu ponownego treningu.
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {(() => {
+        /* [E3-2] Backtest vs Paper — ten sam sym×TF, wspólny okres */
+        const combos = Array.from(new Set(journal
+          .filter(e => e.paper && e.tf && e.tf !== '—' && e.result !== 'open' && e.result !== 'pending' && e.result !== 'cancelled')
+          .map(e => e.sym + '|' + e.tf)));
+        if(!combos.length) return null;
+        const runCompare = async (combo) => {
+          const [sym, tfId] = combo.split('|');
+          const tfObj = TFS.find(t => t.id === tfId);
+          if(!tfObj){ Bus.show('Nieznany interwał ' + tfId); return; }
+          setShadow({ busy:true, res:null, combo });
+          try{
+            const paper = journal.filter(e => e.paper && e.sym === sym && e.tf === tfId
+              && e.result !== 'open' && e.result !== 'pending' && e.result !== 'cancelled');
+            const minTs = Math.min(...paper.map(e => e.ts || Date.now())) / 1000;
+            const ch = await getChart(sym, tfObj, 'auto');
+            const pack = indicatorsFor(ch.candles, tfId);
+            const bt = backtestEngine(ch.candles, pack.ind, pack.emaData, pack.hasVol, sym, 30, null, { tfId });
+            const btCommon = bt.trades.filter(t => ch.candles[t.i0] && ch.candles[t.i0].t >= minTs);
+            const btUse = btCommon.length >= 10 ? btCommon : bt.trades; // wspólny okres, fallback: całość
+            setShadow({ busy:false, combo, res: { cmp: compareShadow(paper, btUse), common: btCommon.length >= 10 } });
+          }catch(err){
+            setShadow({ busy:false, combo, res:null });
+            Bus.show('Porównanie nieudane: ' + (err.message || 'błąd danych'));
+          }
+        };
+        const r = shadow.res && shadow.res.cmp;
+        return (
+          <div className="card" style={{marginTop:2}}>
+            <div style={{fontWeight:800, fontSize:13, marginBottom:6}}>Backtest vs Paper (shadow)</div>
+            <div style={{display:'flex', gap:6, flexWrap:'wrap', marginBottom:6}}>
+              {combos.slice(0, 6).map(cb => (
+                <button key={cb} className={'chip mono' + (shadow.combo === cb ? ' sel' : '')}
+                  style={{fontSize:11, padding:'6px 10px', opacity: shadow.busy ? 0.6 : 1}}
+                  onClick={() => { if(!shadow.busy) runCompare(cb); }}>
+                  {cb.replace('|', ' · ')}
+                </button>
+              ))}
+            </div>
+            {shadow.busy && <div style={{fontSize:12, color:'var(--dim2)'}}>Liczę backtest na bieżących świecach…</div>}
+            {r && !shadow.busy && (
+              <>
+                <div className="kv"><b>PAPER</b><span className="mono">{r.paper.n} tr · {r.paper.avgR != null ? r.paper.avgR + 'R' : '—'} · traf. {r.paper.winRate != null ? r.paper.winRate + '%' : '—'} · BE {Math.round((r.paper.beShare || 0) * 100)}% · approx {Math.round((r.paper.approxShare || 0) * 100)}%</span></div>
+                <div className="kv"><b>BACKTEST</b><span className="mono">{r.backtest.n} tr · {r.backtest.avgR != null ? r.backtest.avgR + 'R' : '—'} · traf. {r.backtest.winRate != null ? r.backtest.winRate + '%' : '—'} · BE {Math.round((r.backtest.beShare || 0) * 100)}%</span></div>
+                <div style={{fontSize:12, lineHeight:1.55, paddingTop:4,
+                  color: r.verdict === 'OK' ? 'var(--up)' : r.verdict === 'NIEWYJAŚNIONA' ? 'var(--down)' : 'var(--dim)'}}>
+                  Werdykt: <b>{r.verdict}</b> — {r.why}{shadow.res.common ? '' : ' · (za mało transakcji we wspólnym okresie — porównano z całą historią świec)'}
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="section-label">Wpisy · {journal.length}</div>
       <div>
@@ -146,13 +300,14 @@ export function JournalScreen({ journal, setJournal }){
               <span style={{color: e.dir > 0 ? 'var(--up)' : 'var(--down)', fontWeight:900, width:18, flexShrink:0}}>{e.dir > 0 ? '▲' : '▼'}</span>
               <div style={{flex:1, minWidth:0}}>
                 <div className="wl-name" style={{whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
-                  {e.sym}{e.tf && e.tf !== '—' ? ' · ' + e.tf : ''}
+                  {prettySym(e.sym)}{e.tf && e.tf !== '—' ? ' · ' + e.tf : ''}
                   {e.paper ? <span className="tag" style={{marginLeft:6, color:'var(--cyan)'}}>{isExp ? '▾ wykres' : '▸ wykres'}</span> : null}
                   {e.src === 'signal' ? <span className="tag" style={{marginLeft:6}}>sygnał{e.score != null ? ' ' + (e.score > 0 ? '+' : '') + e.score : ''}</span> : null}
                   {e.src === 'auto' ? <span className="tag" style={{marginLeft:6, color:'var(--ema9)'}}>🤖 bot</span> : null}
                 </div>
                 <div className="wl-sym mono" style={{whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
-                  {fmtDT(e.ts)}
+                  {'⏱ ' + fmtDT(e.ts)}
+                  {(e.exitTs && e.result !== 'open' && e.result !== 'pending') ? ' → ' + fmtHMS(e.exitTs) + ' · ' + fmtDur(e.exitTs - e.ts) : ''}
                   {e.entry != null ? ' · E ' + fmtPrice(e.entry) + ' SL ' + fmtPrice(e.sl) : ''}
                   {e.note ? ' · ' + e.note : ''}
                 </div>
@@ -175,6 +330,19 @@ export function JournalScreen({ journal, setJournal }){
             {isExp && (
               <div style={{borderBottom:'1px solid var(--border)', background:'rgba(4,24,29,.4)'}}>
                 <MiniLiveChart entry={e} />
+                {/* CZASÓWKA: godzina wejścia, wyjścia i czas w rynku */}
+                <div className="mono" style={{padding:'0 14px 8px', fontSize:11.5, color:'var(--dim)', lineHeight:1.7}}>
+                  <div><span style={{color:'var(--dim2)'}}>Wejście:</span> {fmtDT(e.ts)}:{pad2(new Date(e.ts).getSeconds())}
+                    {e.entry != null ? <span style={{color: e.dir > 0 ? 'var(--up)' : 'var(--down)'}}> {e.dir > 0 ? '▲ LONG' : '▼ SHORT'} @ {fmtPrice(e.entry)}</span> : null}</div>
+                  {(e.result !== 'open' && e.result !== 'pending') ? (
+                    <div><span style={{color:'var(--dim2)'}}>Wyjście:</span> {e.exitTs ? fmtDT(e.exitTs) + ':' + pad2(new Date(e.exitTs).getSeconds()) : '—'}
+                      {e.exit != null ? ' @ ' + fmtPrice(e.exit) : ''}
+                      <span style={{color:'var(--dim2)'}}> · czas w rynku: </span><b>{e.exitTs ? fmtDur(e.exitTs - e.ts) : '—'}</b></div>
+                  ) : (
+                    <div><span style={{color:'var(--dim2)'}}>Status:</span> {e.result === 'pending' ? 'oczekuje (LIMIT)' : 'otwarta'}
+                      <span style={{color:'var(--dim2)'}}> · w rynku od: </span><b>{fmtDur(Date.now() - e.ts)}</b></div>
+                  )}
+                </div>
                 {e.result === 'open' && (
                   <div style={{padding:'0 12px 12px', display:'flex', gap:8}}>
                     <button className="chip mono sel" style={{flex:1, justifyContent:'center', color:'var(--down)'}}
@@ -221,7 +389,7 @@ export function JournalScreen({ journal, setJournal }){
         <div className="modal-bg" onClick={() => setPick(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div style={{fontWeight:900, fontSize:16, marginBottom:4}}>
-              Zamknij: {pick.sym} {pick.dir > 0 ? 'LONG' : 'SHORT'}
+              Zamknij: {prettySym(pick.sym)} {pick.dir > 0 ? 'LONG' : 'SHORT'}
             </div>
             <div style={{fontSize:12, color:'var(--dim2)', marginBottom:12}} className="mono">
               plan z {fmtDT(pick.ts)}{pick.entry != null ? ' · E ' + fmtPrice(pick.entry) : ''}

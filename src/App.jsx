@@ -4,14 +4,16 @@ import { DEFAULT_PREFS, DEFAULT_SMC, DEFAULT_WL } from './constants/defaults.js'
 import { Bus } from './core/bus.js';
 import { Store } from './core/store.js';
 import { CAP_MAP, CapCfg, CapSess, capEnabled, capitalTick, setCapWarned } from './data/capital.js';
-import { fetchQuotes } from './data/feed.js';
-import { resolvePaperList } from './data/paper.js';
+import { fetchQuotes, getChart } from './data/feed.js';
+import { atrSeries } from './indicators/index.js';
+import { paperFloating, resolvePaperList } from './data/paper.js';
 import { TFS } from './data/yahoo.js';
 import { ChartScreen } from './screens/ChartScreen.jsx';
 import { InfoScreen } from './screens/InfoScreen.jsx';
 import { JournalScreen } from './screens/JournalScreen.jsx';
 import { WatchlistScreen } from './screens/WatchlistScreen.jsx';
 import { analyzeSymbol } from './signals/engine.js';
+import { rollingStats, degradation } from './signals/monitor.js';
 import { correlationMatrix, duplicatesExposure } from './signals/correlation.js';
 import { fmtPrice } from './utils/format.js';
 import { notifyUser } from './utils/notify.js';
@@ -87,7 +89,36 @@ export function App(){
     Bus.show('📒 ' + msg);
     notifyUser('Rikipo Paper', msg);
   };
-  const resolveTick = (sym, px) => setJournal(list => resolvePaperList(list, sym, px, paperNote) || list);
+  const resolveTick = (sym, px, opts) => setJournal(list => resolvePaperList(list, sym, px, paperNote, opts) || list);
+
+  /* [A5] ostatnie znane ceny z monitora — do floating risk na poziomie konta */
+  const lastPxRef = useRef({});
+  const liveRisk = (jl, pxOverride) => {
+    let fl = 0, oc = 0;
+    (jl || journal).forEach(e => {
+      if(!(e.paper && e.result === 'open')) return;
+      oc++;
+      const px = (pxOverride && pxOverride[e.sym] != null) ? pxOverride[e.sym] : lastPxRef.current[e.sym];
+      const f = paperFloating(e, px);
+      if(f != null) fl += f;
+    });
+    return { floatingR: +fl.toFixed(2), openCount: oc };
+  };
+
+  /* [E3-1] Monitoring Engine: degradacja modelu ⇒ AUTOMATYCZNY revert
+     (reliable=false → DEFAULT_WEIGHTS, stały sizing, kalibracja off) */
+  useEffect(() => {
+    const meta = Store.get('rt_model_meta', null);
+    if(!meta || !meta.reliable || !meta.sym) return;
+    const roll = rollingStats(journal, meta.sym, meta.tf, 30);
+    const deg = degradation(roll, meta);
+    if(deg.degraded){
+      Store.set('rt_model_meta', { ...meta, reliable:false, stage:'off', reliableStreak:0, degradedAt: Date.now(), degradedWhy: deg.reasons });
+      const msg = '⚠ Degradacja modelu ' + meta.sym + '·' + meta.tf + ': warunki rynkowe przestały odpowiadać walidacji';
+      notifyUser('Rikipo Trader — degradacja modelu', msg + ' (' + deg.reasons.join('; ') + '). Model przełączony na wagi domyślne do czasu retrenu.');
+      Bus.show(msg);
+    }
+  }, [journal]);
 
   /* monitor otwartych pozycji paper (co 15 s, także poza aktywnym wykresem) */
   useEffect(() => {
@@ -110,7 +141,37 @@ export function App(){
             if(r && r[sym] && r[sym].price != null) px = r[sym].price;
           }catch(e){}
         }
-        if(px != null) resolveTick(sym, px);
+        if(px == null) continue;
+        lastPxRef.current[sym] = px;
+        /* [E3-4/C4] świece z TEGO SAMEGO źródła co wykres → trailing
+           strukturalny w paper identyczny z backtestem (cache w net.js
+           minimalizuje koszt; przy braku danych zostaje 1R + trailApprox) */
+        let trailOpts;
+        try{
+          /* obejmij też zlecenia OCZEKUJĄCE — knot dochodzący do entry
+             między odczytami aktywuje wejście (wcześniej pomijane) */
+          const ent = openP.find(e => e.sym === sym && e.result === 'open')
+                   || openP.find(e => e.sym === sym && e.result === 'pending');
+          const tfObj = ent && ent.tf ? TFS.find(t => t.id === ent.tf) : null;
+          if(tfObj){
+            const ch = await getChart(sym, tfObj, prefs.source);
+            const cs = ch && ch.candles;
+            if(cs && cs.length >= 20){
+              const last8 = cs.slice(-8);
+              const atrArr = atrSeries(cs.slice(-60), 14);
+              let atr = null;
+              for(let q=atrArr.length-1;q>=0;q--){ if(atrArr[q] != null){ atr = atrArr[q]; break; } }
+              trailOpts = {
+                /* [FIX] świece do wykrywania SL/TP po H/L (knoty między odczytami) */
+                bars: cs.slice(-40),
+                atr,
+                trailLow: Math.min(...last8.map(c => c.l)),
+                trailHigh: Math.max(...last8.map(c => c.h)),
+              };
+            }
+          }
+        }catch(e){}
+        resolveTick(sym, px, trailOpts);
       }
     }, 15000);
     return () => clearInterval(h);
@@ -137,9 +198,18 @@ export function App(){
           const it = wl[s];
           if(!it || it.sym === activeSym) continue;
           let res = null;
-          try{ res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc, Store.get('rt_model_weights', null), Store.get('rt_model_calib', null)); }catch(e){ continue; }
+          const mMeta = Store.get('rt_model_meta', null);
+          try{
+            res = await analyzeSymbol(it.sym, tfObj, prefs.source, prefs.minScore, prefs.waitPullback, prefs.smc,
+              Store.get('rt_model_weights', null), Store.get('rt_model_calib', null),
+              !!(mMeta && mMeta.reliable), mMeta ? mMeta.payout : null); // [A3]
+          }catch(e){ continue; }
           if(res && res.data && res.data.candles && res.data.candles.length > 30){
             bgClosesRef.current[it.sym] = res.data.candles.slice(-200).map(cc => cc.c);
+            /* [E4-1] utrwalaj macierz korelacji — portfolioCheck czyta ją przy otwarciach */
+            if(Object.keys(bgClosesRef.current).length >= 2){
+              try{ Store.set('rt_corr_matrix', correlationMatrix(bgClosesRef.current)); }catch(e){}
+            }
           }
           const sig = res && res.signal;
           if(!sig) continue;
@@ -234,7 +304,7 @@ export function App(){
     <div className="app">
       {screen === 'list' && <WatchlistScreen wl={wl} setWl={setWl} openChart={openChart} prefs={prefs} setPrefs={setPrefs} />}
       {screen === 'chart' && active && (
-        <ChartScreen item={active} onBack={() => setScreen('list')} prefs={prefs} setPrefs={setPrefs} ai={ai} setAi={setAi} addJournal={addJournal} journal={journal} resolveTick={resolveTick} />
+        <ChartScreen item={active} onBack={() => setScreen('list')} prefs={prefs} setPrefs={setPrefs} ai={ai} setAi={setAi} addJournal={addJournal} journal={journal} resolveTick={resolveTick} liveRisk={liveRisk} />
       )}
       {screen === 'journal' && <JournalScreen journal={journal} setJournal={setJournal} />}
       {screen === 'info' && <InfoScreen prefs={prefs} setPrefs={setPrefs} ai={ai} setAi={setAi} cap={cap} setCap={setCap} wl={wl} setWl={setWl} journal={journal} setJournal={setJournal} />}

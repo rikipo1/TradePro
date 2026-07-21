@@ -6,8 +6,10 @@ if (keystorePropsFile.exists()) {
     keystoreProps.load(new FileInputStream(keystorePropsFile))
 }
 
-// versionCode increments per CI build (VERSION_CODE) so a new APK installs over the old one.
-def versionCodeValue = (System.getenv("VERSION_CODE") ?: "1").toInteger()
+// versionCode must ALWAYS grow so a new APK installs over the old one.
+// CI passes VERSION_CODE = 20270000 + run_number; local builds fall back to a
+// date-based default that is higher than any historical run-number build.
+def versionCodeValue = (System.getenv("VERSION_CODE") ?: "20260713").toInteger()
 
 android {
     namespace "com.rikipo.trader"
@@ -17,7 +19,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode versionCodeValue
-        versionName "1.3.3"
+        versionName "1.9.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

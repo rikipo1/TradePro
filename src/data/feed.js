@@ -1,8 +1,8 @@
 import { Bus } from '../core/bus.js';
-import { fetchJson } from '../core/net.js';
-import { CAP_MAP, capEnabled, capWarned, capitalChart, setCapWarned } from './capital.js';
+import { Net, fetchJson } from '../core/net.js';
+import { CAP_MAP, capEnabled, capWarned, capitalChart, capitalHistory, setCapWarned } from './capital.js';
 import { stooqDaily } from './stooq.js';
-import { yahooChart } from './yahoo.js';
+import { yahooChart, TF_MAX_RANGE } from './yahoo.js';
 import { atrSeries, emaOver } from '../indicators/index.js';
 import { zigzag } from '../patterns/index.js';
 import { marketStructure } from '../smc/index.js';
@@ -115,9 +115,57 @@ export function htfTrend(candles, tfId){
   else dir = structDir !== 0 ? structDir : emaDir;
   return { dir, label: map.label };
 }
+/* [E3-1] licznik świeżości/luk per źródło (ostatnie 24 h) — widoczny w INFO */
+export const FeedHealth = { bySrc: {} };
+function feedHealthNote(src, staleFlag){
+  const now = Date.now();
+  let h = FeedHealth.bySrc[src];
+  if(!h || now - h.since > 24*3600*1000){ h = { since: now, checks: 0, stale: 0 }; FeedHealth.bySrc[src] = h; }
+  h.checks++;
+  if(staleFlag) h.stale++;
+  h.lastTs = now;
+}
+
+/* [FIX] Świece do TRENINGU/BACKTESTU: maksymalny zakres Yahoo dla danego
+   interwału (nie 5 dni z wykresu). To wprost mnoży podaż etykiet TP1/SL,
+   które gatowały training na „za mało próbek". Zawsze Yahoo (Capital ma
+   krótszą historię, a trening nie potrzebuje realtime). Fallback: świece
+   z wykresu, gdy rozszerzony zakres zawiedzie. */
+export async function fetchTrainingCandles(symbol, tf, chartCandles){
+  const baseN = chartCandles ? chartCandles.length : 0;
+  /* 1) Capital.com — najgłębsza historia (paginacja po 1000), gdy LIVE włączone.
+     Yahoo intraday jest ograniczony do ~60 dni; Capital daje więcej etykiet. */
+  if(capEnabled() && CAP_MAP[symbol] && tf.id !== 'D1'){
+    try{
+      const candles = await capitalHistory(symbol, tf, 5000);
+      if(candles && candles.length > baseN){
+        return { candles, range: 'capital', extended: true, source: 'Capital.com' };
+      }
+    }catch(e){ /* spróbuj Yahoo */ }
+  }
+  /* 2) Yahoo — maksymalny zakres per interwał (fallback, bez konta Capital) */
+  const maxRange = TF_MAX_RANGE[tf.id] || tf.range;
+  if(maxRange && maxRange !== tf.range){
+    try{
+      const r = await yahooChart(symbol, { ...tf, range: maxRange });
+      if(r && r.candles && r.candles.length > baseN){
+        return { candles: r.candles, range: maxRange, extended: true, source: 'Yahoo ' + maxRange };
+      }
+    }catch(e){ /* padło rozszerzenie — użyj świec z wykresu */ }
+  }
+  return { candles: chartCandles || [], range: tf.range, extended: false, source: 'wykres' };
+}
+
 /* wybór źródła: tylko realne dane na żywo (DEMO usunięte) */
 export async function getChart(symbol, tf, source){
   const r = await fetchChart(symbol, tf);
   r.demo = false;
+  try{
+    const last = r.candles && r.candles.length ? r.candles[r.candles.length-1] : null;
+    const step = TF_SEC[tf.id] || 300;
+    const stale = !!(last && (Date.now()/1000 - last.t) > step*2 + 90);
+    r.stale = stale;
+    feedHealthNote(Net.last || '—', stale);
+  }catch(e){}
   return r;
 }

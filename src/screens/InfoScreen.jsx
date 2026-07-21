@@ -1,5 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { DEFAULT_SMC } from '../constants/defaults.js';
+import { logParamChange } from '../core/paramlog.js';
+import { FeedHealth } from '../data/feed.js';
 import { Bus } from '../core/bus.js';
 import { Net } from '../core/net.js';
 import { Store } from '../core/store.js';
@@ -87,6 +89,16 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
               Bus.show(nv ? '🎯 Alert okazji: powiadomię o dobrych sytuacjach (korekta, odwrócenie, retest wybicia, OB) gdy cena zbliża się do strefy' : 'Alert okazji wyłączony');
               return { ...p, pbAlert:nv };
             })}>{(prefs.pbAlert !== false) ? '🎯 ALERT OKAZJI' : '○ Alert okazji'}</button>
+          <button className={'chip mono' + ((prefs.freeTrade !== false) ? ' sel' : ' off')}
+            style={(prefs.freeTrade !== false) ? {color:'var(--up)', borderColor:'rgba(47,214,174,.4)'} : null}
+            onClick={() => setPrefs(p => {
+              const nv = !(p.freeTrade !== false);
+              Bus.show(nv ? '🔓 Swobodny trading: bez limitów — wiele pozycji naraz, bez blokad portfela/kill-switch' : '🔒 Limity ryzyka aktywne: max ekspozycja, korelacje, kill-switch');
+              return { ...p, freeTrade:nv };
+            })}>{(prefs.freeTrade !== false) ? '🔓 SWOBODNY TRADING' : '🔒 Limity ryzyka'}</button>
+        </div>
+        <div style={{fontSize:11, color:'var(--dim2)', marginBottom:10, lineHeight:1.4}}>
+          🔓 <b>Swobodny trading</b> (domyślnie WŁ.): otwierasz dowolną liczbę pozycji, także wiele na tym samym instrumencie — blokady portfela (suma ryzyka, korelacje, VaR) i kill-switch dnia stają się tylko ostrzeżeniami. Wyłącz, by przywrócić pełną ochronę kapitału.
         </div>
         <div style={{fontSize:11.5, color:'var(--dim2)', marginBottom:6}}>
           Minimalny score wejścia: <b className="mono" style={{color:'var(--text)'}}>±{prefs.minScore != null ? prefs.minScore : 30}</b>
@@ -123,23 +135,42 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
         </div>
       </div>
 
+      {(() => { const locked = prefs.tuneLock !== false; return (
       <div className="card">
-        <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:4}}>
+        <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:4, flexWrap:'wrap'}}>
           <h3 style={{margin:0}}>Strojenie SMC (progi silnika)</h3>
           <span className="spacer" style={{flex:1}} />
-          <button className="chip mono" style={{fontSize:11, padding:'5px 9px', color:'var(--accent)', borderColor:'rgba(255,138,117,.4)'}}
+          <button className="chip mono" style={{fontSize:11, padding:'5px 9px',
+            color: locked ? 'var(--ema9)' : 'var(--up)',
+            borderColor: locked ? 'rgba(255,201,77,.45)' : 'rgba(47,214,174,.45)',
+            background: locked ? 'rgba(255,201,77,.08)' : 'rgba(47,214,174,.08)'}}
             onClick={() => {
+              setPrefs(p => ({ ...p, tuneLock: !locked }));
+              Bus.show(locked ? '🔓 Suwaki odblokowane — możesz zmieniać progi' : '🔒 Suwaki zablokowane — chronione przed przypadkową zmianą');
+            }}>{locked ? '🔒 Zablokowane' : '🔓 Odblokowane'}</button>
+          <button className="chip mono" style={{fontSize:11, padding:'5px 9px', color:'var(--accent)', borderColor:'rgba(255,138,117,.4)', opacity: locked ? 0.45 : 1}}
+            onClick={() => {
+              if(locked){ Bus.show('🔒 Najpierw odblokuj suwaki'); return; }
               setPrefs(p => ({ ...p, smc:{ ...DEFAULT_SMC } }));
               Bus.show('↺ Progi SMC przywrócone do wartości domyślnych');
-            }}>↺ Reset do domyślnych</button>
+            }}>↺ Reset</button>
         </div>
-        <div style={{fontSize:12, color:'var(--dim)', lineHeight:1.6, marginBottom:10}}>
+        <div style={{fontSize:12, color:'var(--dim)', lineHeight:1.6, marginBottom:6}}>
           Domyślne wartości są rozsądnym startem — dostrój je własnym backtestem na realnych
           danych DAX/US100. Zmiany działają natychmiast na wykresie, w skanerze i w backteście.
         </div>
+        <div style={{fontSize:11.5, color:'var(--ema9)', lineHeight:1.55, marginBottom:10, padding:'7px 10px', border:'1px solid rgba(255,201,77,.35)', borderRadius:9, background:'rgba(255,201,77,.07)'}}>
+          ⚠ zmiana niezwalidowana — po zmianie przetrenuj i sprawdź OOS. Każda zmiana
+          progu toru decyzyjnego jest logowana (rt_paramlog) pod kontrolę adaptacji.
+        </div>
         {(() => {
           const smc = prefs.smc || DEFAULT_SMC;
-          const setSmc = (k, v) => setPrefs(p => ({ ...p, smc:{ ...DEFAULT_SMC, ...(p.smc||{}), [k]:v } }));
+          const setSmc = (k, v) => {
+            if(locked) return; // suwaki zablokowane
+            /* [E2-5] log zmian parametrów toru decyzyjnego (fundament E4-3) */
+            logParamChange('smc.' + k, (prefs.smc || DEFAULT_SMC)[k], v);
+            setPrefs(p => ({ ...p, smc:{ ...DEFAULT_SMC, ...(p.smc||{}), [k]:v } }));
+          };
           const rows = [
             ['premium', 'Próg PREMIUM (short powyżej %)', 55, 80, 1, '%', 'Powyżej tego % zakresu cena jest „droga" — preferowane shorty'],
             ['discount', 'Próg DISCOUNT (long poniżej %)', 20, 45, 1, '%', 'Poniżej tego % cena jest „tania" — preferowane longi'],
@@ -163,7 +194,8 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
                   </b>
                 </div>
                 <input type="range" min={min} max={max} step={step} value={val}
-                  style={{width:'100%', accentColor: isDef ? 'var(--dim)' : 'var(--cyan)'}}
+                  disabled={locked}
+                  style={{width:'100%', accentColor: isDef ? 'var(--dim)' : 'var(--cyan)', opacity: locked ? 0.5 : 1, cursor: locked ? 'not-allowed' : 'pointer'}}
                   onChange={e => setSmc(k, parseFloat(e.target.value))} />
                 <div style={{fontSize:10.5, color:'var(--dim2)', lineHeight:1.4}}>{hint}</div>
               </div>
@@ -171,6 +203,7 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
           });
         })()}
       </div>
+      ); })()}
 
       <div className="card" style={{borderColor:'rgba(255,138,117,.35)'}}>
         <h3 style={{color:'var(--accent)'}}>Kopia zapasowa (klucze API + ustawienia)</h3>
@@ -538,6 +571,22 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
           Symulowane świece (DEMO) zostały usunięte.
           Pełną stabilność sieci daje aplikacja APK (natywny HTTP) lub plik otwarty w Chrome.
         </div>
+        {(() => {
+          /* [E3-1] data monitoring: świeżość per źródło (ostatnie 24 h) */
+          const srcs = Object.entries(FeedHealth.bySrc || {});
+          if(!srcs.length) return null;
+          return (
+            <div style={{marginTop:8, paddingTop:8, borderTop:'1px solid var(--border)'}}>
+              <div style={{fontSize:11, color:'var(--dim2)', marginBottom:4}}>Świeżość danych (24 h): pobrania / z opóźnieniem &gt;2×TF+90 s</div>
+              {srcs.map(([src, h]) => (
+                <div key={src} className="kv" style={{fontSize:11.5}}>
+                  <b style={{color:'var(--dim)'}}>{src}</b>
+                  <span className="mono" style={{color: h.stale > h.checks * 0.2 ? 'var(--ema9)' : 'var(--dim)'}}>{h.checks} / {h.stale} stale</span>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </div>
 
       <div className="card" style={{borderColor:'rgba(255,138,117,.25)'}}>
@@ -549,7 +598,7 @@ export function InfoScreen({ prefs, setPrefs, ai, setAi, cap, setCap, wl, setWl,
       </div>
 
       <div style={{textAlign:'center', padding:'10px 0 22px', fontSize:10.5, color:'var(--dim2)'}} className="mono">
-        Rikipo Trader v1.3.3 · auto-epic + diag · motyw Baltic Dawn
+        Rikipo Trader v1.7.0 · audyt instytucjonalny E1–E4 · motyw Baltic Dawn
       </div>
     </div>
   );

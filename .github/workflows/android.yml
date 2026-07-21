@@ -37,9 +37,10 @@ jobs:
         run: npx cap sync android
 
       - name: Build signed release APK
-        env:
-          VERSION_CODE: ${{ github.run_number }}
         run: |
+          # 20270000 + run_number: zawsze wyżej niż lokalne buildy date-based
+          # (2026xxxx) i stare buildy CI (małe run_number) — patrz build.gradle.
+          export VERSION_CODE=$((20270000 + GITHUB_RUN_NUMBER))
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon

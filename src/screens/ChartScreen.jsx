@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { aiPrompt, buildAiContext, callClaude, callGemini, tolerantJson } from '../ai/index.js';
-import { backtestEngine, walkForward } from '../backtest/engine.js';
+import { backtestEngine, walkForwardKFold } from '../backtest/engine.js';
+import { ablationTable, ablationAscii } from '../backtest/ablation.js';
+import { nextModelStage, stageLabel } from '../core/governance.js';
+import { saveModelVersion, listModelVersions, activateModelVersion, getActiveVersion } from '../core/modelStore.js';
+import { compareValidation, summarizeRun } from '../core/adaptive.js';
+import { logParamChange } from '../core/paramlog.js';
+import { DEFAULT_SMC } from '../constants/defaults.js';
 import { riskStatus } from '../signals/riskEngine.js';
 import { Store } from '../core/store.js';
 import { ChartCanvas } from '../components/ChartCanvas.jsx';
@@ -9,16 +15,20 @@ import { IC, Ic } from '../components/icons.jsx';
 import { Bus } from '../core/bus.js';
 import { Net } from '../core/net.js';
 import { CAP_MAP, capEnabled, capResolveEpic, capWsStart, capWsStop, capitalTick } from '../data/capital.js';
-import { TF_SEC, getChart, htfTrend } from '../data/feed.js';
+import { TF_SEC, getChart, htfTrend, fetchTrainingCandles } from '../data/feed.js';
 import { TFS } from '../data/yahoo.js';
 import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
 import { detectPatterns } from '../patterns/index.js';
-import { computeSignal } from '../signals/engine.js';
+import { computeSignal, indicatorsFor } from '../signals/engine.js';
 import { displacement } from '../smc/index.js';
+import { portfolioCheck } from '../signals/portfolio.js';
+import { buildPaperEntry } from '../data/paperEntry.js';
+import { buildStrategyCtx, rankStrategies } from '../strategies/engine.js';
+import { masterVerdict } from '../signals/master.js';
 import { fmtClock, fmtFull, fmtPct, fmtPrice, fmtVol } from '../utils/format.js';
 import { notifyUser } from '../utils/notify.js';
 
-export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJournal, journal, resolveTick }){
+export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJournal, journal, resolveTick, liveRisk }){
   const tf = TFS.find(t => t.id === prefs.tf) || TFS[1];
   const [data, setData] = useState({ candles:[], price:null, prev:null, demo:false });
   const [loading, setLoading] = useState(false);
@@ -29,10 +39,21 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const [showAi, setShowAi] = useState(false);
   const [aiState, setAiState] = useState({ busy:false, res:null, err:null, at:null, provider:null });
   const [showBt, setShowBt] = useState(false);
+  const [showStrat, setShowStrat] = useState(false); // 🏛 ranking strategii
+  const [showMaster, setShowMaster] = useState(false); // ⚡ silnik nadrzędny MASTER
+  const [fs, setFs] = useState(false);               // pełny ekran wykresu
+  const [expStrat, setExpStrat] = useState(null);     // rozwinięty wiersz rankingu
   const [ticket, setTicket] = useState(null);
   const [bt, setBt] = useState({ busy:false, res:null });
   const [wv, setWv] = useState(0); // wersja wag modelu (bump po treningu → recompute)
+  const [trainCool, setTrainCool] = useState(0); // [E2-4] cooldown przycisku treningu (s)
+  useEffect(() => {
+    if(trainCool <= 0) return;
+    const h = setInterval(() => setTrainCool(c => (c > 0 ? c - 1 : 0)), 1000);
+    return () => clearInterval(h);
+  }, [trainCool > 0]);
   const prevDirRef = useRef(0);
+  const liveCandlesRef = useRef([]);
   const lastAlertRef = useRef({ dir:0, t:0, bar:null });
   const pbAlertRef = useRef({ key:null, t:0 });
   const macroRef = useRef(null);
@@ -116,10 +137,26 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
           if(px < last.l) last.l = px;
           cs[cs.length-1] = last;
         }
+        liveCandlesRef.current = cs;   // najświeższe świece (z knotami) do rozliczeń
         return Object.assign({}, d, { candles:cs, price:px, live:true });
       });
       setUpdated(new Date());
-      resolveTick(item.sym, px);
+      /* [FIX] rozliczaj paper po EKSTREMACH świec (knoty), tak jak skaner tła w App.jsx —
+         inaczej na ekranie wykresu wejścia/TP1/TP2/SL nie zawsze „łapały" (tylko cena próbki) */
+      const cs = liveCandlesRef.current;
+      let ropts;
+      if(cs && cs.length >= 20){
+        const last8 = cs.slice(-8);
+        const atrArr = atrSeries(cs.slice(-60), 14);
+        let atr = null;
+        for(let q=atrArr.length-1; q>=0; q--){ if(atrArr[q] != null){ atr = atrArr[q]; break; } }
+        ropts = {
+          bars: cs.slice(-40), atr,
+          trailLow: Math.min(...last8.map(c => c.l)),
+          trailHigh: Math.max(...last8.map(c => c.h)),
+        };
+      }
+      resolveTick(item.sym, px, ropts);
     };
     const flushH = setInterval(() => {
       if(pending.px == null) return;
@@ -269,15 +306,106 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     srWithHtf.__weights = Store.get('rt_model_weights', null);
     srWithHtf.__calib = Store.get('rt_model_calib', null);
     srWithHtf.__knn = Store.get('rt_knn_history', null);
+    const mMeta = Store.get('rt_model_meta', null);
+    srWithHtf.__reliable = !!(mMeta && mMeta.reliable); // [A3] parytet skaner↔wykres
+    srWithHtf.__payout = mMeta ? (mMeta.payout || null) : null; // [A4] EV empiryczne
+    srWithHtf.__tfSec = TF_SEC[tf.id] || 300; // [E3-1] twarda bramka stale
+    /* [E4-2] drawdown dziennika (R) → tryb obronny sizingu */
+    {
+      let peak = 0, cur = 0, dd = 0;
+      journal.filter(e => e.result && e.result !== 'open' && e.result !== 'pending' && e.result !== 'cancelled')
+        .slice().sort((a, b) => (a.exitTs || a.ts || 0) - (b.exitTs || b.ts || 0))
+        .forEach(e => { cur += (e.r || 0); if(cur > peak) peak = cur; if(peak - cur > dd) dd = peak - cur; });
+      srWithHtf.__ddR = +dd.toFixed(2);
+    }
     if(prefs.minProb != null) srWithHtf.__minProb = prefs.minProb;
     return computeSignal(candlesSafe, ind, emaData, patterns, hasVol, null, srWithHtf);
   }, [ind, candlesSafe, emaData, patterns, hasVol, tf.id, prefs.minScore, prefs.minProb, prefs.waitPullback, prefs.smc, item.sym, wv]);
-  /* najlepsza „okazja" poza samym aktywnym sygnałem (do paska i alertu) */
+  /* 🏛 Instytucjonalny ranking strategii — moduł DORADCZY obok zwalidowanego
+     silnika (auto-trade nadal decyduje computeSignal; parytet validate↔serve).
+     THROTTLE: detektory pracują na ZAMKNIĘTEJ świecy (n-2), więc przeliczamy
+     ranking tylko przy NOWEJ świecy (barSig) i zmianie dziennika — nie na
+     każdym ticku ceny. To eliminuje zbędne obciążenie CPU przy streamie. */
+  const barSig = candlesSafe.length ? candlesSafe.length + ':' + candlesSafe[candlesSafe.length-1].t : '0';
+  const stratRank = useMemo(() => {
+    if(!ind || candlesSafe.length < 60) return null;
+    try{
+      const ctx = buildStrategyCtx(candlesSafe, ind, emaData, hasVol, item.sym, TF_SEC[tf.id] || 300, null);
+      return ctx ? rankStrategies(ctx, journal) : null;
+    }catch(e){ return null; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barSig, item.sym, tf.id, journal, wv]);
+
+  /* 🌐 kanoniczny feed MASTER: M15, NIEZALEŻNIE od oglądanego interwału.
+     Bez tego werdykt liczył się ze świec bieżącego widoku i na H1 potrafił
+     mówić SHORT, a na M15 LONG w tej samej minucie. Teraz drabina i detektory
+     zawsze pracują na tym samym materiale → jeden globalny werdykt. */
+  const [mfeed, setMfeed] = useState(null);
+  useEffect(() => {
+    let stop = false;
+    if(tf.id === 'M15') return; // widok M15 = kanon, drugi fetch zbędny
+    const M15 = TFS.find(t => t.id === 'M15');
+    const pull = async () => {
+      try{
+        const r = await getChart(item.sym, M15, prefs.source);
+        if(!stop && r && r.candles && r.candles.length >= 60) setMfeed({ sym:item.sym, candles:r.candles });
+      }catch(e){}
+    };
+    pull();
+    const h = setInterval(pull, 60000);
+    return () => { stop = true; clearInterval(h); };
+  }, [item.sym, prefs.source, tf.id]);
+
+  /* ranking 🏛 na feedzie kanonicznym (gdy widok ≠ M15) — przeliczany tylko
+     przy odświeżeniu feedu (60 s), nie na każdym ticku */
+  const canonRank = useMemo(() => {
+    if(tf.id === 'M15' || !mfeed || mfeed.sym !== item.sym || mfeed.candles.length < 60) return null;
+    try{
+      const pack = indicatorsFor(mfeed.candles, 'M15');
+      if(!pack) return null;
+      const ctx = buildStrategyCtx(mfeed.candles, pack.ind, pack.emaData, pack.hasVol, item.sym, 900, null);
+      return ctx ? rankStrategies(ctx, journal) : null;
+    }catch(e){ return null; }
+  }, [mfeed, item.sym, tf.id, journal]);
+
+  /* ⚡ SILNIK NADRZĘDNY MASTER — jeden werdykt z: silnika k-fold (trigger),
+     rankingu 🏛 (konfluencja) i drabiny WSZYSTKICH interwałów (kontekst
+     top-down), liczony z kanonu M15 — ten sam na każdym widoku. */
+  const master = useMemo(() => {
+    if(!candlesSafe.length) return null;
+    try{
+      if(tf.id === 'M15'){
+        return masterVerdict({ candles: candlesSafe, tfId:'M15', tfSec:900, signal, rank: stratRank });
+      }
+      if(mfeed && mfeed.sym === item.sym && mfeed.candles.length >= 60){
+        return masterVerdict({ candles: mfeed.candles, tfId:'M15', tfSec:900, signal, rank: canonRank });
+      }
+      /* kanon jeszcze się ładuje — tymczasowo licz z widoku (oznaczone) */
+      const m = masterVerdict({ candles: candlesSafe, tfId: tf.id, tfSec: TF_SEC[tf.id] || 300, signal, rank: stratRank });
+      if(m) m.provisional = true;
+      return m;
+    }catch(e){ return null; }
+  }, [candlesSafe, tf.id, signal, stratRank, mfeed, canonRank, item.sym]);
+
+  /* najlepsza „okazja" poza samym aktywnym sygnałem (do paska i alertu);
+     okazje z RR < 1.2 odsiane — proponowanie wejścia z celem bliżej niż
+     ryzyko to amatorka, która tylko zaśmiecała ekran */
   const topOpp = useMemo(() => {
     const ops = signal && signal.opportunities;
     if(!ops || !ops.length) return null;
-    return ops.find(o => o.kind !== 'signal-now') || null;
+    return ops.find(o => o.kind !== 'signal-now' && (o.rr == null || o.rr >= 1.2)) || null;
   }, [signal]);
+
+  /* znaczniki WEJŚĆ w otwarte pozycje paper na tym symbolu (na wykresie) */
+  const posMarkers = useMemo(() => {
+    return (journal || [])
+      .filter(e => e.paper && e.sym === item.sym && (e.result === 'open' || e.result === 'pending'))
+      .map(e => {
+        const d = new Date(e.ts);
+        const hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+        return { t: Math.floor(e.ts / 1000), price: e.entry, dir: e.dir, label: (e.result === 'pending' ? '⏳ ' : '') + hm };
+      });
+  }, [journal, item.sym]);
 
   const sigLevels = useMemo(() => {
     const out = [];
@@ -288,6 +416,17 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
         { p: L.sl,    label: 'SL',    color: '#ff6b5e' },
         { p: L.tp1,   label: 'TP1',   color: '#2fd6ae' },
         { p: L.tp2,   label: 'TP2',   color: 'rgba(47,214,174,.65)' },
+      );
+    }
+    /* 🏛 poziomy zwycięskiej strategii rankingu na wykresie, gdy główny
+       silnik nie ma aktywnego sygnału (fiolet — odróżnienie od silnika) */
+    if(!(signal && signal.dir !== 0 && signal.levels) && stratRank && stratRank.dir !== 0 && stratRank.levels){
+      const L = stratRank.levels;
+      out.push(
+        { p: L.entry, label: '🏛 E',   color: '#c792ff' },
+        { p: L.sl,    label: '🏛 SL',  color: 'rgba(255,107,94,.8)' },
+        { p: L.tp1,   label: '🏛 TP1', color: 'rgba(47,214,174,.8)' },
+        { p: L.tp2,   label: '🏛 TP2', color: 'rgba(47,214,174,.5)' },
       );
     }
     const op = topOpp;
@@ -301,7 +440,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       out.push({ p: op.entry, label: '⌖ ' + op.grade, color: '#ffc94d' });
     }
     return out.length ? out : null;
-  }, [signal, topOpp]);
+  }, [signal, topOpp, stratRank]);
 
   /* powiadomienie, gdy cena zbliża się do strefy dobrej okazji */
   useEffect(() => {
@@ -367,6 +506,8 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
     }
   };
   const aiKeySet = (ai.provider || 'claude') === 'gemini' ? !!ai.keyGemini : !!ai.keyClaude;
+  /* kolor paska gotowości: czerwony → żółty → zielony */
+  const readyColor = (pct) => pct >= 85 ? '#2fd6ae' : pct >= 50 ? '#ffc94d' : '#ff6b5e';
   const aiRes = aiState.res;
   const aiVerdict = aiRes ? String(aiRes.verdict || 'WAIT').toUpperCase() : null;
   const aiVerdictCol = aiVerdict === 'LONG' ? 'var(--up)' : aiVerdict === 'SHORT' ? 'var(--down)' : 'var(--dim)';
@@ -374,16 +515,39 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const aiAgree = aiRes ? (typeof aiRes.agree_with_engine === 'boolean' ? aiRes.agree_with_engine : (aiVerdict === engineDirTxt)) : null;
   const aiRisks = (aiRes && Array.isArray(aiRes.key_risks)) ? aiRes.key_risks.slice(0, 3) : [];
 
-  /* paper trading — pomocnicy */
-  const makePaper = (dir, entry, sl, tp1, tp2, srcTag, score, eq) => {
-    const risk = Math.abs(entry - sl);
-    return {
-      id: Date.now(), ts: Date.now(), sym:item.sym, name:item.name, tf:tf.id,
-      dir, entry, sl, tp1, tp2, risk,
-      rr1: +(Math.abs(tp1 - entry) / Math.max(risk, 1e-9)).toFixed(2),
-      result:'open', r:0, paper:true, src:(srcTag || 'manual'), score:(score != null ? score : null),
-      entryQuality: eq || null,
-    };
+  /* paper trading — pomocnicy (budowa wpisu: data/paperEntry.js [E4-4]) */
+  const makePaper = (dir, entry, sl, tp1, tp2, srcTag, score, eq, sig) => buildPaperEntry({
+    sym: item.sym, name: item.name, tfId: tf.id,
+    dir, entry, sl, tp1, tp2, srcTag, score, eq, sig,
+    modelV: (Store.get('rt_model_meta', null) || {}).modelV || null,
+  });
+
+  /* [E4-1] każde otwarcie paper przechodzi przez Portfolio Risk Engine
+     (cap sumaryczny, korelacje, VaR-lite) — zastępuje klasowe proxy z [A5] */
+  const tryOpenPaper = (dir, entry, sl, tp1, tp2, srcTag, score, eq, sig, extra) => {
+    const e = makePaper(dir, entry, sl, tp1, tp2, srcTag, score, eq, sig);
+    if(extra) Object.assign(e, extra); // np. strategy — zasila uczenie rankingu
+    const open = journal
+      .filter(x => x.paper && x.result === 'open')
+      .map(x => ({ sym: x.sym, dir: x.dir, riskPct: x.riskPct != null ? x.riskPct : 0.5 }));
+    const volR = (sig && sig.atr && e.risk > 0) ? +(sig.atr / e.risk).toFixed(2) : null;
+    const freeTrade = prefs.freeTrade !== false; // domyślnie WŁĄCZONY — bez twardych blokad portfela
+    const pc = portfolioCheck(
+      { sym: item.sym, dir, riskPct: e.riskPct != null ? e.riskPct : 0.5, volR },
+      open, Store.get('rt_corr_matrix', null));
+    if(!pc.allowed){
+      if(!freeTrade){
+        Bus.show('🛑 Portfel: ' + pc.reason + ' — wejście odrzucone');
+        return false;
+      }
+      Bus.show('⚠️ Portfel: ' + pc.reason + ' — otwieram mimo limitu (tryb swobodny)');
+      e.note = ((e.note || '') + (e.note ? ' · ' : '') + '⚠ ' + pc.reason).trim();
+    } else if(pc.scale < 1 && !freeTrade){
+      if(e.riskPct != null) e.riskPct = +(e.riskPct * pc.scale).toFixed(2);
+      e.note = ((e.note || '') + (e.note ? ' · ' : '') + pc.reason).trim();
+    }
+    addJournal(e);
+    return true;
   };
   /* zlecenie LIMIT w strefę okazji (paper): czeka aż cena DOJDZIE do wejścia,
      kasuje się przy unieważnieniu struktury albo po 12 h */
@@ -463,17 +627,30 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
       notifyUser('Rikipo Trader — ' + (strong ? 'MOCNY sygnał ' : 'sygnał ') + dtxt, msg);
       Bus.show((strong ? '🔥 ' : '⚡ ') + msg);
     }
-    if(prefs.autoTrade && signal.levels && !journal.some(e => e.paper && e.result === 'open' && e.sym === item.sym)){
-      /* Risk Engine: kill-switch blokuje AUTOMAT (dzienny limit / seria strat) */
-      const rs = riskStatus(journal);
-      if(rs.blocked){
+    if(prefs.autoTrade && signal.levels && (prefs.freeTrade !== false || !journal.some(e => e.paper && e.result === 'open' && e.sym === item.sym))){
+      /* [E3-3] okno makro = zakaz dla automatu (ręczne wejście z ostrzeżeniem) */
+      if(signal.autoTradeBlock){
+        Bus.show('⛔ Okno makro: ' + signal.macroWindow + ' — auto-trade zablokowany');
+        return;
+      }
+      /* ⚡ MASTER: drabina WSZYSTKICH interwałów przeciw → bot nie wchodzi
+         pod prąd wyższego rzędu (kontrola jakości sygnału, nie limit ryzyka) */
+      if(master && master.veto){
+        Bus.show('⛔ MASTER: ' + master.veto + ' — auto-trade wstrzymany');
+        return;
+      }
+      /* Risk Engine v2 [A5]: floating + limit otwartych + dzienny limit UTC */
+      const live = liveRisk ? liveRisk(journal, { [item.sym]: data.price }) : undefined;
+      const rs = riskStatus(journal, {}, live);
+      if(rs.blocked && prefs.freeTrade === false){
         Bus.show('🛑 Kill-switch: ' + rs.reason + ' — auto-trade wstrzymany');
       } else {
-        addJournal(makePaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'auto', signal.score, signal.entryQuality));
-        Bus.show('🤖 AUTO-TRADE: otwarto ' + dtxt + ' (paper) @ ' + fmtPrice(signal.levels.entry));
+        if(tryOpenPaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'auto', signal.score, signal.entryQuality, signal)){
+          Bus.show('🤖 AUTO-TRADE: otwarto ' + dtxt + ' (paper) @ ' + fmtPrice(signal.levels.entry));
+        }
       }
     }
-  }, [signal, prefs.alert, prefs.autoTrade, prefs.onlyStrong, prefs.waitPullback, item.sym, tf.label]);
+  }, [signal, master, prefs.alert, prefs.autoTrade, prefs.onlyStrong, prefs.waitPullback, item.sym, tf.label]);
 
   const lastT = candlesSafe.length ? candlesSafe[candlesSafe.length-1].t : null;
   const tfSecC = TF_SEC[tf.id] || 300;
@@ -485,7 +662,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
   const priceColor = pct == null ? 'var(--text)' : up ? 'var(--up)' : 'var(--down)';
 
   return (
-    <div className="screen" style={{overflow:'hidden'}}>
+    <div className="screen" style={{overflowY:'auto', overflowX:'hidden'}}>
       <div className="topbar" style={{paddingBottom:4}}>
         <button className="iconbtn" onClick={onBack}><Ic d={IC.back} size={20} /></button>
         <div style={{minWidth:0}}>
@@ -517,6 +694,9 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
         </button>
         <button className="iconbtn" onClick={() => { Net.blockedUntil = 0; load(); }}>
           <span className={loading ? 'spin' : ''} style={{display:'flex'}}><Ic d={IC.refresh} size={18} /></span>
+        </button>
+        <button className="iconbtn" title="Pełny ekran wykresu" onClick={() => setFs(true)}>
+          <span style={{fontSize:17, lineHeight:1}}>⛶</span>
         </button>
       </div>
 
@@ -572,6 +752,8 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
           onClick={() => setShowAi(true)}>✦ AI</button>
         <button className="chip mono" style={{color:'var(--ema9)', borderColor:'rgba(255,201,77,.35)'}}
           onClick={() => setShowBt(true)}>⟲ BACKTEST</button>
+        <button className="chip mono" style={{color:'#c792ff', borderColor:'rgba(199,146,255,.4)'}}
+          onClick={() => setShowStrat(true)}>🏛 RANKING{stratRank && stratRank.verdict !== 'BRAK TRANSAKCJI' ? ' · ' + stratRank.verdict : ''}</button>
         {[['form','ZNACZNIKI'],['boll','BB'],['vwap','VWAP'],['sr','S/R']].map(([k, l]) => (
           <button key={k} className={'chip mono' + (iprefs[k] ? ' sel' : ' off')}
             onClick={() => toggleOverlay(k)}>{l}</button>
@@ -583,41 +765,63 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
         ))}
       </div>
 
-      {signal && (
-        <button className="sigstrip" onClick={() => setShowSig(true)}
-          style={{
-            borderColor: signal.dir > 0 ? 'rgba(47,214,174,.45)' : signal.dir < 0 ? 'rgba(255,107,94,.45)' : 'var(--border2)',
-            background: signal.dir > 0 ? 'rgba(47,214,174,.07)' : signal.dir < 0 ? 'rgba(255,107,94,.07)' : 'var(--panel)',
-          }}>
-          <span className="sig-dir" style={{color: signal.dir > 0 ? '#2fd6ae' : signal.dir < 0 ? '#ff6b5e' : '#8fb0ac'}}>
-            {signal.dir > 0 ? 'LONG' : signal.dir < 0 ? 'SHORT' : 'CZEKAJ'}{signal.strong ? ' ★' : ''}
-          </span>
-          <span className="sgauge">
-            <i style={{width: Math.min(100, Math.abs(signal.score)) + '%',
-              background: signal.dir > 0 ? '#2fd6ae' : signal.dir < 0 ? '#ff6b5e' : '#8fb0ac'}} />
-          </span>
-          <span className="sig-meta mono" style={{color:'var(--dim)'}}>
-            {signal.setupScore != null ? 'P(win) ' + signal.setupScore + '%' + (signal.ev != null ? ' · EV ' + (signal.ev>0?'+':'') + signal.ev + 'R' : '') : 'confluence ' + (signal.score > 0 ? '+' : '') + signal.score}
-            <br/>
-            {signal.dir !== 0 && signal.levels
-              ? 'SL ' + fmtPrice(signal.levels.sl) + ' · TP1 ' + fmtPrice(signal.levels.tp1)
-              : 'brak przewagi (EV/prob poniżej progu)'}
-          </span>
-          {signal.dir !== 0 && signal.entryQuality && (
-            <span className="mono" style={{
-              fontSize:10.5, fontWeight:800, padding:'2px 6px', borderRadius:6, whiteSpace:'nowrap',
-              color: signal.entryQuality.good ? '#2fd6ae' : signal.entryQuality.chase ? '#ff8a75' : '#8fb0ac',
-              background: signal.entryQuality.good ? 'rgba(47,214,174,.12)' : signal.entryQuality.chase ? 'rgba(255,138,117,.12)' : 'rgba(143,176,172,.10)',
-              border: '1px solid ' + (signal.entryQuality.good ? 'rgba(47,214,174,.35)' : signal.entryQuality.chase ? 'rgba(255,138,117,.35)' : 'rgba(143,176,172,.25)'),
+      {/* ⚡ MASTER — JEDEN werdykt: silnik k-fold (trigger) + ranking 🏛
+          (konfluencja) + drabina wszystkich interwałów (kontekst top-down) */}
+      {master && (() => {
+        const m = master;
+        const dcol = m.dir > 0 ? '#2fd6ae' : m.dir < 0 ? '#ff6b5e' : '#8fb0ac';
+        const rc = readyColor(m.readiness);
+        const L = m.levels;
+        return (
+          <div className="stratstrip" onClick={() => setShowMaster(true)}
+            style={{
+              cursor:'pointer',
+              borderColor: m.dir > 0 ? 'rgba(47,214,174,.45)' : m.dir < 0 ? 'rgba(255,107,94,.45)' : m.veto ? 'rgba(255,201,77,.45)' : 'var(--border2)',
+              background: m.dir > 0 ? 'rgba(47,214,174,.07)' : m.dir < 0 ? 'rgba(255,107,94,.07)' : 'var(--panel)',
             }}>
-              {signal.entryQuality.good ? '✓ przy ' + signal.entryQuality.anchor
-                : signal.entryQuality.chase ? '⚠ ' + signal.entryQuality.dist + '×ATR od ' + signal.entryQuality.anchor
-                : '• ' + signal.entryQuality.dist + '×ATR'}
-            </span>
-          )}
-          {signal.warns.length > 0 && <span style={{color:'var(--ema9)', fontSize:15}}>⚠</span>}
-        </button>
-      )}
+            {/* wiersz 1: werdykt + ocena + drabina interwałów + przycisk */}
+            <div style={{display:'flex', alignItems:'center', gap:9}}>
+              <span style={{fontWeight:900, fontSize:14.5, letterSpacing:.3, color:dcol, flexShrink:0}}>
+                ⚡ {m.verdict}{m.state === 'entry' && signal && signal.strong ? ' ★' : ''}
+                {m.dir === 0 && m.lean !== 0 && (
+                  <span style={{color: m.lean > 0 ? '#2fd6ae' : '#ff6b5e', marginLeft:4}}>{m.lean > 0 ? '▲' : '▼'}</span>
+                )}
+              </span>
+              {m.dir !== 0 && (
+                <span className="mono" style={{fontSize:10.5, fontWeight:800, padding:'2px 7px', borderRadius:6, flexShrink:0,
+                  color:'#051b21', background:dcol}}>{m.grade} · {m.confidence}%</span>
+              )}
+              <span className="mono" style={{flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:10.5, color:'var(--dim)'}}>
+                {(m.provisional ? '' : '🌐 ') + m.ladder.map(f => f.id + (f.dir > 0 ? '▲' : f.dir < 0 ? '▼' : '•')).join(' ')}
+              </span>
+              {m.dir !== 0 && L && (
+                <button className="stratbtn" onClick={(ev) => {
+                    ev.stopPropagation();
+                    if(tryOpenPaper(m.dir, L.entry, L.sl, L.tp1, L.tp2, m.state === 'setup' ? 'strategy:' + (m.srcStrategy || 'master') : 'signal', m.confidence, signal ? signal.entryQuality : null, signal, m.srcStrategy ? { strategy: m.srcStrategy } : undefined)){
+                      Bus.show('▶ ' + (m.dir > 0 ? 'KUP' : 'SPRZEDAJ') + ' (paper) @ ' + fmtPrice(L.entry) + (m.state === 'setup' ? ' — setup warunkowy 🏛' : ''));
+                    }
+                  }}
+                  style={{color: m.dir > 0 ? '#051b21' : '#fff', background: m.dir > 0 ? '#2fd6ae' : '#ff6b5e'}}>
+                  ▶ {m.dir > 0 ? 'KUP' : 'SPRZEDAJ'}
+                </button>
+              )}
+            </div>
+            {/* wiersz 2: pasek gotowości */}
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              <span className="readybar"><i style={{width: Math.max(6, m.readiness) + '%', background: rc}} /></span>
+              <span className="mono" style={{fontSize:10, fontWeight:800, color: rc, flexShrink:0, minWidth:64, textAlign:'right'}}>
+                {m.readiness >= 100 ? 'GOTOWE' : 'gotowość ' + m.readiness + '%'}
+              </span>
+            </div>
+            {/* wiersz 3: poziomy albo status lejka / veto */}
+            <div className="mono" style={{fontSize:10.5, color: m.veto ? 'var(--ema9)' : 'var(--dim2)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+              {L
+                ? (m.state === 'setup' ? '(warunkowo 🏛) ' : '') + 'E ' + fmtPrice(L.entry) + ' · SL ' + fmtPrice(L.sl) + ' · TP1 ' + fmtPrice(L.tp1) + ' · TP2 ' + fmtPrice(L.tp2)
+                : m.label}
+            </div>
+          </div>
+        );
+      })()}
 
       {topOpp && topOpp.state !== 'invalidated' && (() => {
         const op = topOpp;
@@ -639,6 +843,11 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
               <span className="mono" style={{fontSize:10.5, fontWeight:800, color:st.col}}>{st.ic} {st.txt}</span>
               <span className="mono" style={{fontSize:10.5, fontWeight:800, padding:'1px 6px', borderRadius:6, color:'#051b21', background:'#ffc94d'}}>{op.grade} · {op.confidence}%</span>
             </div>
+            {master && master.dir !== 0 && op.dir !== master.dir && (
+              <div className="mono" style={{fontSize:10.5, fontWeight:800, color:'var(--ema9)'}}>
+                ⚠ przeciw werdyktowi ⚡ MASTER ({master.verdict}) — to gra na korektę, nie z trendem
+              </div>
+            )}
             <div className="mono" style={{display:'flex', alignItems:'center', gap:8, fontSize:11.5}}>
               <span style={{color:'var(--text)', fontWeight:800}}>wejście ~{fmtPrice(op.entry)}</span>
               {op.target != null && <span style={{color:'var(--dim2)'}}>cel {fmtPrice(op.target)}{op.rr != null ? ' · RR ' + op.rr : ''}</span>}
@@ -671,7 +880,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
         </div>
       )}
 
-      <div style={{flex:1, display:'flex', flexDirection:'column', position:'relative', minHeight:280}}>
+      <div style={{flex:1, display:'flex', flexDirection:'column', position:'relative', minHeight:160}}>
         <ChartCanvas
           key={item.sym + '|' + tf.id}
           candles={candlesSafe}
@@ -686,8 +895,18 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
           patMap={patterns.patMap}
           focus={focus}
           levels={sigLevels}
+          posMarkers={posMarkers}
           resetKey={item.sym + '|' + tf.id}
         />
+        {/* zawsze widoczny przycisk pełnego ekranu (pasek górny bywa ciasny na wąskich ekranach) */}
+        {candlesSafe.length > 0 && (
+          <button title="Pełny ekran wykresu" onClick={() => setFs(true)}
+            style={{position:'absolute', top:8, right:8, zIndex:5, width:34, height:34, borderRadius:10,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              background:'rgba(5,27,33,.72)', border:'1px solid var(--border2)', color:'var(--text)', backdropFilter:'blur(3px)'}}>
+            <span style={{fontSize:16, lineHeight:1}}>⛶</span>
+          </button>
+        )}
         {loading && !candlesSafe.length && (
           <div className="overlaymsg"><div className="loader" /><div style={{color:'var(--dim)', fontSize:13}}>Pobieram świece {tf.label}…</div></div>
         )}
@@ -769,7 +988,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 <span className="mono" style={{fontSize:11, fontWeight:800, padding:'3px 8px', borderRadius:7, background: signal.setupScore>=66?'rgba(47,214,174,.15)':signal.setupScore>=52?'rgba(255,201,77,.15)':'rgba(143,176,172,.1)', color: signal.setupScore>=66?'var(--up)':signal.setupScore>=52?'var(--ema9)':'var(--dim)'}}>P(win) {signal.setupScore}%</span>
                 {signal.ev != null && <span className="mono" style={{fontSize:11, fontWeight:700, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border2)', color: signal.ev>0?'var(--up)':'var(--down)'}}>EV {signal.ev>0?'+':''}{signal.ev}R</span>}
                 {signal.regime && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color:'var(--dim)'}}>{signal.regime.type} · ADX {signal.regime.adx}</span>}
-                {signal.sizing && signal.dir !== 0 && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color:'var(--dim)'}}>ryzyko {signal.sizing.riskPct}%</span>}
+                {signal.sizing && signal.dir !== 0 && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)', color: signal.sizing.defensive ? 'var(--ema9)' : 'var(--dim)'}}>ryzyko {signal.sizing.riskPct}%{signal.sizing.defensive ? ' · tryb obronny (DD>5R)' : ''}</span>}
                 {signal.similar && <span className="mono" style={{fontSize:11, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid rgba(79,216,255,.3)', color:'var(--cyan)'}}>≈ {signal.similar.n} podobnych: {signal.similar.wins}/{signal.similar.n} traf</span>}
               </div>
             )}
@@ -900,12 +1119,13 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                     color: signal.dir > 0 ? 'var(--up)' : 'var(--down)',
                     borderColor: signal.dir > 0 ? 'rgba(47,214,174,.5)' : 'rgba(255,107,94,.5)'}}
                   onClick={() => {
-                    if(journal.some(e => e.paper && e.result === 'open' && e.sym === item.sym)){
+                    if(prefs.freeTrade === false && journal.some(e => e.paper && e.result === 'open' && e.sym === item.sym)){
                       Bus.show('Masz już otwartą pozycję paper na ' + item.sym);
                       return;
                     }
-                    addJournal(makePaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'signal', signal.score, signal.entryQuality));
-                    Bus.show('▶ Otwarto pozycję paper @ ' + fmtPrice(signal.levels.entry) + ' — rozliczy się sama na SL/TP');
+                    if(tryOpenPaper(signal.dir, signal.levels.entry, signal.levels.sl, signal.levels.tp1, signal.levels.tp2, 'signal', signal.score, signal.entryQuality, signal)){
+                      Bus.show('▶ Otwarto pozycję paper @ ' + fmtPrice(signal.levels.entry) + ' — rozliczy się sama na SL/TP');
+                    }
                     setShowSig(false);
                   }}>▶ Wykonaj sygnał (paper trade)</button>
               )}
@@ -1045,72 +1265,349 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   Bus.show('SL i TP muszą być po właściwych stronach ceny');
                   return;
                 }
-                addJournal(makePaper(d, ticket.entry, sl, t1, isFinite(t2) ? t2 : null, 'manual', null));
-                Bus.show('▶ Pozycja paper otwarta @ ' + fmtPrice(ticket.entry));
+                if(tryOpenPaper(d, ticket.entry, sl, t1, isFinite(t2) ? t2 : null, 'manual', null)){
+                  Bus.show('▶ Pozycja paper otwarta @ ' + fmtPrice(ticket.entry));
+                }
                 setTicket(null);
               }}>Otwórz pozycję (paper)</button>
           </div>
         </div>
       )}
 
+
+      {showStrat && (
+        <div className="modal-bg" onClick={() => setShowStrat(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div style={{display:'flex', alignItems:'center', gap:9, marginBottom:6}}>
+              <span style={{fontWeight:900, fontSize:16}}>🏛 Ranking strategii</span>
+              <span className="tag mono">{item.sym} · {tf.label}</span>
+              <span className="spacer" />
+              {stratRank && <span className="mono" style={{fontSize:10.5, color:'var(--dim2)'}}>{stratRank.regime} · {stratRank.session}</span>}
+            </div>
+            <div style={{overflowY:'auto', flex:1}}>
+              {!stratRank && <div style={{fontSize:13, color:'var(--dim2)', padding:'20px 4px'}}>Poczekaj na dane wykresu (min 60 świec).</div>}
+              {stratRank && (
+                <>
+                  {/* WERDYKT */}
+                  <div style={{background:'var(--bg)', border:'1px solid ' + (stratRank.dir > 0 ? 'rgba(47,214,174,.45)' : stratRank.dir < 0 ? 'rgba(255,107,94,.45)' : 'var(--border2)'), borderRadius:12, padding:'10px 12px', marginBottom:8}}>
+                    <div style={{display:'flex', alignItems:'baseline', gap:10}}>
+                      <span style={{fontWeight:900, fontSize:20, color: stratRank.dir > 0 ? 'var(--up)' : stratRank.dir < 0 ? 'var(--down)' : 'var(--dim)'}}>{stratRank.verdict}</span>
+                      {stratRank.best && <span style={{fontSize:12, fontWeight:700, color:'var(--text)'}}>{stratRank.best.name}</span>}
+                      <span className="spacer" />
+                      {stratRank.best && <span className="mono" style={{fontSize:12, fontWeight:800, color:'#c792ff'}}>{stratRank.confidence}%</span>}
+                    </div>
+                    {stratRank.levels && (
+                      <div className="mono" style={{fontSize:11.5, marginTop:6, lineHeight:1.7}}>
+                        <div>Entry <b>{fmtPrice(stratRank.levels.entry)}</b> · SL <b style={{color:'var(--down)'}}>{fmtPrice(stratRank.levels.sl)}</b> · R:R {stratRank.expectedRR}</div>
+                        <div>TP1 {fmtPrice(stratRank.levels.tp1)} · TP2 {fmtPrice(stratRank.levels.tp2)} · TP3 {fmtPrice(stratRank.levels.tp3)} · TP4 {fmtPrice(stratRank.levels.tp4)}</div>
+                        <div style={{color:'var(--dim2)'}}>trailing: {stratRank.levels.trailing}</div>
+                        <div>P(win) ~{Math.round(stratRank.probability*100)}% <span style={{color:'var(--dim2)'}}>({stratRank.probabilitySrc})</span></div>
+                      </div>
+                    )}
+                    {stratRank.dir !== 0 && stratRank.levels
+                      && !journal.some(e => e.paper && (e.result === 'open' || e.result === 'pending') && e.sym === item.sym) && (
+                      <button className="chip mono sel" style={{width:'100%', justifyContent:'center', padding:'10px', marginTop:8, fontSize:13,
+                        color: stratRank.dir > 0 ? 'var(--up)' : 'var(--down)'}}
+                        onClick={() => {
+                          const L = stratRank.levels;
+                          if(tryOpenPaper(stratRank.dir, L.entry, L.sl, L.tp1, L.tp2, 'strategy:' + stratRank.best.id, stratRank.confidence, null, signal, { strategy: stratRank.best.id })){
+                            Bus.show('▶ Paper z rankingu: ' + stratRank.best.name + ' — wynik zasili uczenie strategii');
+                            setShowStrat(false);
+                          }
+                        }}>▶ Otwórz paper wg tej strategii</button>
+                    )}
+                  </div>
+
+                  {/* SUB-SCORES */}
+                  <div style={{display:'flex', gap:5, flexWrap:'wrap', marginBottom:8}}>
+                    {[['Struktura', stratRank.scores.marketStructure], ['Trend', stratRank.scores.trend], ['Momentum', stratRank.scores.momentum],
+                      ['Płynność', stratRank.scores.liquidity], ['Zmienność', stratRank.scores.volatility], ['Ryzyko', stratRank.scores.risk]].map(([l, v], k) => (
+                      <span key={k} className="mono" style={{fontSize:10.5, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid var(--border)',
+                        color: l === 'Ryzyko' ? (v > 60 ? 'var(--down)' : 'var(--dim)') : (v >= 65 ? 'var(--up)' : v <= 35 ? 'var(--down)' : 'var(--dim)')}}>{l} {v}</span>
+                    ))}
+                    {stratRank.mtf && stratRank.mtf.frames.length > 0 && (
+                      <span className="mono" style={{fontSize:10.5, padding:'3px 8px', borderRadius:7, background:'var(--bg)', border:'1px solid rgba(199,146,255,.35)', color:'#c792ff'}}>
+                        MTF {stratRank.mtf.align > 0 ? '▲' : stratRank.mtf.align < 0 ? '▼' : '•'} {stratRank.mtf.frames.map(f => f.id + (f.dir > 0 ? '↑' : f.dir < 0 ? '↓' : '·')).join(' ')}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* RANKING */}
+                  <div className="section-label" style={{padding:'4px 0'}}>Ranking wykrytych strategii</div>
+                  {stratRank.ranking.length === 0 && <div style={{fontSize:12, color:'var(--dim2)', padding:'6px 2px'}}>Żaden detektor nie widzi aktywnego setupu na tej świecy.</div>}
+                  {stratRank.ranking.map((r, k) => {
+                    const isExp = expStrat === r.id;
+                    const L = r.levels;
+                    return (
+                      <React.Fragment key={r.id}>
+                        <div style={{display:'flex', alignItems:'center', gap:8, padding:'5px 2px', borderBottom: isExp ? 'none' : '1px solid var(--border)', cursor:'pointer'}}
+                          onClick={() => setExpStrat(x => x === r.id ? null : r.id)}>
+                          <span className="mono" style={{width:16, color:'var(--dim2)', fontSize:11}}>{k+1}.</span>
+                          <span style={{color: r.dir > 0 ? 'var(--up)' : 'var(--down)', fontWeight:900, width:14}}>{r.dir > 0 ? '▲' : '▼'}</span>
+                          <span style={{flex:1, fontSize:12.5, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{isExp ? '▾ ' : '▸ '}{r.name}</span>
+                          <span className="sgauge" style={{width:52}}><i style={{width: r.score + '%', background: r.score >= 60 ? '#c792ff' : '#8fb0ac'}} /></span>
+                          <span className="mono" style={{fontSize:12, fontWeight:800, width:38, textAlign:'right', color: r.score >= 60 ? '#c792ff' : 'var(--dim)'}}>{r.score}%</span>
+                        </div>
+                        {isExp && L && (
+                          <div style={{margin:'0 0 6px 20px', padding:'8px 10px', background:'var(--bg)', border:'1px solid var(--border)', borderRadius:10, borderBottom:'1px solid var(--border)'}}>
+                            {r.score < 60 && (
+                              <div style={{fontSize:10.5, color:'var(--ema9)', marginBottom:4}}>⚠ scenariusz WARUNKOWY ({r.score}% &lt; próg 60%) — poziomy orientacyjne, czekaj na spełnienie warunków</div>
+                            )}
+                            <div className="mono" style={{fontSize:11.5, lineHeight:1.7}}>
+                              <div>Entry <b>{fmtPrice(L.entry)}</b> · SL <b style={{color:'var(--down)'}}>{fmtPrice(L.sl)}</b> <span style={{color:'var(--dim2)'}}>({fmtPrice(L.slDist)} pkt)</span></div>
+                              <div>TP1 <b style={{color:'var(--up)'}}>{fmtPrice(L.tp1)}</b> · TP2 {fmtPrice(L.tp2)} · TP3 {fmtPrice(L.tp3)} · TP4 {fmtPrice(L.tp4)}</div>
+                              <div style={{color:'var(--dim2)'}}>P(win) ~{Math.round((r.probability || 0)*100)}% ({r.probabilitySrc}) · {r.learn}</div>
+                            </div>
+                            <div style={{fontSize:11, color:'var(--dim)', marginTop:4, lineHeight:1.5}}>{r.why.join(' · ')}</div>
+                            <div style={{fontSize:10.5, color:'var(--down)', marginTop:2}}>unieważnia: {r.invalidates.join(' · ')}</div>
+                            {!journal.some(e => e.paper && (e.result === 'open' || e.result === 'pending') && e.sym === item.sym) && (
+                              <button className="chip mono" style={{width:'100%', justifyContent:'center', padding:'8px 0', marginTop:6, fontSize:12,
+                                color: r.dir > 0 ? 'var(--up)' : 'var(--down)', borderColor: r.dir > 0 ? 'rgba(47,214,174,.4)' : 'rgba(255,107,94,.4)'}}
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  if(tryOpenPaper(r.dir, L.entry, L.sl, L.tp1, L.tp2, 'strategy:' + r.id, r.score, null, signal, { strategy: r.id })){
+                                    Bus.show('▶ Paper: ' + r.name + (r.score < 60 ? ' (scenariusz warunkowy!)' : '') + ' — wynik zasili uczenie');
+                                    setShowStrat(false);
+                                  }
+                                }}>▶ Otwórz paper wg tej strategii ({r.dir > 0 ? 'LONG' : 'SHORT'})</button>
+                            )}
+                          </div>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+
+                  {/* EXPLAIN AI */}
+                  <div className="section-label" style={{padding:'10px 0 4px'}}>Explain AI — dlaczego ta decyzja</div>
+                  <div style={{background:'var(--bg)', border:'1px solid var(--border)', borderRadius:12, padding:'9px 12px', fontSize:12, lineHeight:1.65}}>
+                    {stratRank.explain.why.map((w, k) => <div key={'w'+k}>• {w}</div>)}
+                    {stratRank.explain.rejected && stratRank.explain.rejected.length > 0 && (
+                      <div style={{marginTop:6}}><b style={{color:'var(--dim)'}}>Odrzucone / niżej:</b>{stratRank.explain.rejected.map((t, k) => <div key={'r'+k} style={{color:'var(--dim2)'}}>· {t}</div>)}</div>
+                    )}
+                    {stratRank.explain.invalidates && (
+                      <div style={{marginTop:6}}><b style={{color:'var(--down)'}}>Unieważni analizę:</b>{stratRank.explain.invalidates.map((t, k) => <div key={'i'+k} style={{color:'var(--dim2)'}}>· {t}</div>)}</div>
+                    )}
+                    {(stratRank.explain.conditions || stratRank.explain.watch) && (
+                      <div style={{marginTop:6}}><b style={{color:'var(--up)'}}>Warunki / co obserwować:</b>{(stratRank.explain.conditions || stratRank.explain.watch).map((t, k) => <div key={'c'+k} style={{color:'var(--dim2)'}}>· {t}</div>)}</div>
+                    )}
+                    {stratRank.explain.improves && (
+                      <div style={{marginTop:6}}><b style={{color:'var(--cyan)'}}>Zwiększy prawdopodobieństwo:</b>{stratRank.explain.improves.map((t, k) => <div key={'p'+k} style={{color:'var(--dim2)'}}>· {t}</div>)}</div>
+                    )}
+                  </div>
+
+                  <div style={{marginTop:10, fontSize:10.5, color:'var(--dim2)', lineHeight:1.6}}>{stratRank.disclaimer}</div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {showBt && (
         <div className="modal-bg" onClick={() => setShowBt(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div style={{display:'flex', alignItems:'center', gap:9, marginBottom:8}}>
               <span style={{fontWeight:900, fontSize:16}}>⟲ Backtest silnika</span>
-              <span className="tag mono">{item.sym} · {tf.label} · {candlesSafe.length} świec</span>
+              <span className="tag mono">{item.sym} · {tf.label} · {bt.res && bt.res.trainMeta ? bt.res.trainMeta.candles + ' świec' + (bt.res.trainMeta.source ? ' · ' + bt.res.trainMeta.source : '') : candlesSafe.length + ' świec (wykres)'}</span>
             </div>
             <div style={{overflowY:'auto', flex:1}}>
               <button className="chip sel mono"
                 style={{width:'100%', justifyContent:'center', padding:'12px', fontSize:14, opacity: bt.busy ? 0.6 : 1}}
-                onClick={() => {
+                onClick={async () => {
                   if(bt.busy || !ind || candlesSafe.length < 90){
                     if(!bt.busy) Bus.show('Za mało świec do backtestu (min 90)');
                     return;
                   }
                   setBt({ busy:true, res:null });
+                  /* [FIX] backtest na MAKSYMALNEJ historii (nie 5 dni z wykresu) —
+                     żeby nie pokazywał „3 transakcji" na tak małej próbie */
+                  let cc = candlesSafe, cpack = { ind, emaData, hasVol }, cext = false, csrc = 'wykres';
+                  if(tf.id !== 'D1'){
+                    try{
+                      const tc = await fetchTrainingCandles(item.sym, tf, candlesSafe);
+                      if(tc.candles && tc.candles.length > candlesSafe.length){
+                        cc = tc.candles; cext = tc.extended; csrc = tc.source || 'wykres';
+                        cpack = indicatorsFor(cc, tf.id) || cpack;
+                      }
+                    }catch(e){}
+                  }
                   setTimeout(() => {
-                    const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc,
-                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
+                    /* [PARYTET] backtest MUSI liczyć na tym samym modelu co live:
+                       wagi wyuczone WYŁĄCZNIE gdy model jest wiarygodny dla TEGO
+                       instrumentu·TF — inaczej live jedzie na domyślnych, a panel
+                       pokazywałby zawyżony wynik in-sample z wyuczonych wag. */
+                    const mMeta = Store.get('rt_model_meta', null);
+                    const modelMatch = !!(mMeta && mMeta.reliable && mMeta.sym === item.sym && mMeta.tf === tf.id);
+                    const useW = modelMatch ? Store.get('rt_model_weights', null) : null;
+                    const useC = modelMatch ? Store.get('rt_model_calib', null) : null;
+                    const r = backtestEngine(cc, cpack.ind, cpack.emaData, cpack.hasVol, item.sym, prefs.minScore, prefs.smc,
+                      { weights: useW, calib: useC, tfId: tf.id });
+                    r.trainMeta = { candles: cc.length, extended: cext, source: csrc };
+                    r.modelUsed = modelMatch ? 'wyuczone' : 'domyślne';
+                    r.candlesUsed = cc;
                     setBt({ busy:false, res:r });
                   }, 40);
                 }}>
-                {bt.busy ? 'Liczę świeca po świecy…' : 'Uruchom backtest na załadowanej historii'}
+                {bt.busy ? 'Liczę świeca po świecy…' : 'Uruchom backtest (maks. historia)'}
               </button>
               <button className="chip mono"
                 style={{width:'100%', justifyContent:'center', padding:'10px', fontSize:13, marginTop:8, color:'var(--cyan)', borderColor:'rgba(79,216,255,.4)', opacity: bt.busy ? 0.6 : 1}}
-                onClick={() => {
-                  if(bt.busy || !ind || candlesSafe.length < 250){ if(!bt.busy) Bus.show('Do treningu wag trzeba ≥250 świec (zmień interwał na większy zakres)'); return; }
+                onClick={async () => {
+                  if(bt.busy || !ind || candlesSafe.length < 90){ if(!bt.busy) Bus.show('Poczekaj na dane wykresu'); return; }
+                  if(trainCool > 0){ Bus.show('⏳ Cooldown treningu: odczekaj ' + trainCool + ' s'); return; } // [E2-4]
+                  if(tf.id === 'D1'){ Bus.show('Trening wag działa na interwałach śróddziennych (M5–H1)'); return; }
+                  setTrainCool(60);
                   setBt({ busy:true, res:null });
+                  Bus.show('⏳ Pobieram maksymalną historię do treningu…');
+                  /* [FIX] trening na MAKSYMALNEJ historii Yahoo (nie 5 dni z wykresu) —
+                     wprost mnoży podaż etykiet TP1/SL, które gatowały „za mało próbek" */
+                  let tc, tpack, trainCandles, ext = false, tsrc = 'wykres';
+                  try{
+                    tc = await fetchTrainingCandles(item.sym, tf, candlesSafe);
+                    trainCandles = tc.candles; ext = tc.extended; tsrc = tc.source || 'wykres';
+                    tpack = indicatorsFor(trainCandles, tf.id);
+                  }catch(e){ trainCandles = candlesSafe; tpack = { ind, emaData, hasVol }; }
+                  if(!tpack || !trainCandles || trainCandles.length < 250){
+                    setBt({ busy:false, res:null });
+                    Bus.show('Za mało historii do treningu (' + (trainCandles ? trainCandles.length : 0) + ' świec, min 250) — Yahoo nie daje dłuższej dla ' + tf.label);
+                    return;
+                  }
                   setTimeout(() => {
-                    const wf = walkForward(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, tf.id);
+                    const wf = walkForwardKFold(trainCandles, tpack.ind, tpack.emaData, tpack.hasVol, item.sym, prefs.minScore, prefs.smc, tf.id, { timeBudgetMs: 20000 });
                     if(wf && wf.ok){
+                      /* [E2-3] pełna aktywacja dopiero po 2 treningach reliable ≥24 h */
+                      const prevMeta = Store.get('rt_model_meta', null);
+                      const st = nextModelStage(prevMeta, !!wf.reliable, Date.now());
                       Store.set('rt_model_weights', wf.weights);
-                      Store.set('rt_model_calib', wf.calib || null);
+                      Store.set('rt_model_calib', wf.calib || null); // [A1] kalibracja WYŁĄCZNIE z pooled OOS
                       Store.set('rt_knn_history', wf.samples && wf.samples.length >= 40 ? wf.samples : null);
-                      Store.set('rt_model_meta', { n: wf.training.n, reliable: !!wf.reliable, oosBrier: wf.oosBrier, at: Date.now() });
+                      const meta = {
+                        sym: item.sym, tf: tf.id, // [E3-1] monitoring wie, czego pilnować
+                        n: wf.training.n,
+                        reliable: st.stage === 'active', // konsumenci __reliable bez zmian
+                        kfReliable: !!wf.reliable, reliableWhy: wf.reliableWhy || [],
+                        stage: st.stage, reliableStreak: st.streak, candidateAt: st.candidateAt,
+                        totalNoos: wf.totalNoos,
+                        oosPairsN: wf.oosPairsN, agg: wf.agg, payout: wf.payout,
+                        regimeCoverage: wf.regimeCoverage, at: Date.now(),
+                        trainCandles: trainCandles.length, trainExtended: ext, trainSource: tsrc, // [FIX] ile świec i skąd
+                        /* [E3-5] odcisk danych treningowych: pierwsza/ostatnia świeca + n */
+                        dataHash: trainCandles.length ? (trainCandles[0].t + '-' + trainCandles[trainCandles.length-1].t + '-' + trainCandles.length) : null,
+                      };
+                      /* [E3-5] każdy trening = nowa wersja (max 3, FIFO) */
+                      const knnPayload = wf.samples && wf.samples.length >= 40 ? wf.samples : null;
+                      meta.modelV = saveModelVersion(item.sym, tf.id, { weights: wf.weights, calib: wf.calib || null, meta, knn: knnPayload });
+                      Store.set('rt_model_meta', meta);
                       setWv(v => v + 1);
-                      Bus.show('🧠 OOS: ' + (wf.outSample.n||0) + ' tr · PF ' + (wf.outSample.pf||0) + ' · ' + (wf.outSample.avgR||0) + 'R'
-                        + (wf.oosBrier != null ? ' · Brier ' + wf.oosBrier : '')
-                        + (wf.reliable ? '' : ' · ⚠ MAŁA PRÓBA (n=' + wf.training.n + ') — nie ufaj tym wagom'));
+                      Bus.show('🧠 k-fold OOS (' + trainCandles.length + ' świec · ' + tsrc + '): ' + wf.totalNoos + ' tr · med avgR ' + (wf.agg.avgR.med != null ? wf.agg.avgR.med : '—') + 'R'
+                        + (wf.agg.brier.p75 != null ? ' · Brier p75 ' + wf.agg.brier.p75 : '')
+                        + ' · ' + stageLabel(meta));
+                    } else if(wf && wf.samplesCollected != null){
+                      /* [FIX] czytelny komunikat zamiast gołego „za mało próbek": ile
+                         zebrano vs potrzeba i dlaczego (BE/TIMEOUT poza etykietami K5) */
+                      Bus.show('⚠ Za mało etykiet TP1/SL: zebrano ' + wf.samplesCollected + ' z ' + wf.samplesNeeded
+                        + ' (na ' + trainCandles.length + ' świecach było ' + wf.tradesN + ' transakcji, reszta to BE/TIMEOUT). '
+                        + 'Ten instrument·TF handluje za rzadko — spróbuj większy interwał (M15/H1) lub bardziej zmienny instrument.');
                     } else {
                       Bus.show('Trening nieudany: ' + (wf ? wf.reason : 'brak danych'));
                     }
-                    const r = backtestEngine(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc,
-                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), knn: Store.get('rt_knn_history', null), tfId: tf.id });
+                    /* uwaga: to przebieg IN-SAMPLE na wyuczonych wagach (pełna
+                       historia treningu) — górne statystyki są opisowe/zawyżone;
+                       uczciwy dowód to blok walk-forward OOS niżej */
+                    const r = backtestEngine(trainCandles, tpack.ind, tpack.emaData, tpack.hasVol, item.sym, prefs.minScore, prefs.smc,
+                      { weights: Store.get('rt_model_weights', null), calib: Store.get('rt_model_calib', null), tfId: tf.id });
                     r.wf = wf;
+                    r.inSample = true;
+                    r.modelUsed = 'wyuczone (in-sample)';
+                    r.trainMeta = { candles: trainCandles.length, extended: ext, source: tsrc };
+                    r.candlesUsed = trainCandles;
                     setBt({ busy:false, res:r });
                   }, 40);
                 }}>
-                🧠 Trenuj wagi z backtestu (walk-forward)
+                🧠 Trenuj wagi z backtestu (walk-forward){trainCool > 0 ? ' · ' + trainCool + ' s' : ''}
               </button>
+              <button className="chip mono"
+                style={{width:'100%', justifyContent:'center', padding:'8px', fontSize:12, marginTop:8, color:'var(--dim)', borderColor:'var(--border2)', opacity: bt.busy ? 0.6 : 1}}
+                onClick={() => {
+                  if(bt.busy || !ind || candlesSafe.length < 250){ if(!bt.busy) Bus.show('Do ablacji trzeba ≥250 świec'); return; }
+                  setBt({ busy:true, res:null });
+                  setTimeout(() => {
+                    /* [E2-1] harness ablacyjny na bieżących świecach — wynik do konsoli */
+                    const rows = ablationTable(candlesSafe, item.sym, tf.id, { minScore: prefs.minScore, smcCfg: prefs.smc, timeBudgetMs: 60000 });
+                    console.log('[ABLACJA] ' + item.sym + ' · ' + tf.id + '\n' + ablationAscii(rows));
+                    const scored = rows.filter(r => r.medAvgR != null).sort((a, b) => b.medAvgR - a.medAvgR);
+                    Bus.show('🔬 Ablacja w konsoli · najlepsza konfiguracja: ' + (scored.length ? scored[0].konfiguracja + ' (' + scored[0].medAvgR + 'R)' : 'za mało transakcji OOS'));
+                    setBt({ busy:false, res:null });
+                  }, 40);
+                }}>
+                🔬 Ablacja (dev) — wynik do konsoli
+              </button>
+              {(() => {
+                /* [E4-3] Adaptive Learning Control: zmienione progi SMC muszą
+                   przejść k-fold vs ostatnio zwalidowane — inaczej rollback */
+                const validated = Store.get('rt_smc_validated', null) || DEFAULT_SMC;
+                const changed = JSON.stringify(validated) !== JSON.stringify(prefs.smc || DEFAULT_SMC);
+                if(!changed) return null;
+                return (
+                  <button className="chip mono"
+                    style={{width:'100%', justifyContent:'center', padding:'10px', fontSize:12.5, marginTop:8, color:'var(--ema9)', borderColor:'rgba(255,201,77,.45)', background:'rgba(255,201,77,.07)', opacity: bt.busy ? 0.6 : 1}}
+                    onClick={() => {
+                      if(bt.busy || !ind || candlesSafe.length < 250){ if(!bt.busy) Bus.show('Do walidacji trzeba ≥250 świec'); return; }
+                      setBt({ busy:true, res:null });
+                      setTimeout(() => {
+                        const oldRes = walkForwardKFold(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, validated, tf.id, { timeBudgetMs: 20000 });
+                        const newRes = walkForwardKFold(candlesSafe, ind, emaData, hasVol, item.sym, prefs.minScore, prefs.smc, tf.id, { timeBudgetMs: 20000 });
+                        const cmp = compareValidation(oldRes, newRes);
+                        logParamChange('smc.walidacja', summarizeRun(oldRes), summarizeRun(newRes), { accept: cmp.accept, reasons: cmp.reasons });
+                        if(cmp.accept){
+                          Store.set('rt_smc_validated', { ...(prefs.smc || DEFAULT_SMC) });
+                          Bus.show('✓ Nowe progi zwalidowane OOS (' + summarizeRun(newRes) + ')' + (cmp.reasons.length ? ' · ' + cmp.reasons[0] : ''));
+                        } else {
+                          setPrefs(pp => ({ ...pp, smc: { ...validated } }));
+                          Bus.show('↩ ROLLBACK progów SMC: ' + cmp.reasons.join('; '));
+                        }
+                        setBt({ busy:false, res:null });
+                      }, 40);
+                    }}>
+                    ⚖ Zastosuj: zwaliduj zmienione progi SMC (k-fold, auto-rollback)
+                  </button>
+                );
+              })()}
               {Store.get('rt_model_weights', null) && (() => {
                 const meta = Store.get('rt_model_meta', null);
                 return (
                   <div style={{marginTop:6, fontSize:10.5, color: meta && !meta.reliable ? 'var(--ema9)' : 'var(--dim2)'}} className="mono">
-                    Model używa WYUCZONYCH wag{meta ? ' (n=' + meta.n + (meta.reliable ? ', wiarygodne' : ', ⚠ mała próba — traktuj jako eksperyment') + ')' : ''}.
+                    {meta && meta.reliable
+                      ? 'Model używa WYUCZONYCH wag (n=' + meta.n + ', OOS ' + (meta.totalNoos || 0) + ' tr, wiarygodne).'
+                      : 'Wagi zapisane, ale NIEAKTYWNE (live liczy na domyślnych). Powód: ' + ((meta && meta.reliableWhy && meta.reliableWhy.length) ? meta.reliableWhy.join(' · ') : 'model niewiarygodny') + '.'}
                     <button className="mono" style={{marginLeft:8, color:'var(--down)', background:'none', border:'none', textDecoration:'underline'}}
                       onClick={() => { Store.set('rt_model_weights', null); Store.set('rt_model_calib', null); Store.set('rt_model_meta', null); setWv(v=>v+1); Bus.show('Przywrócono wagi domyślne'); }}>reset</button>
+                  </div>
+                );
+              })()}
+              {(() => {
+                /* [E3-5] wersje modelu dla sym×TF + przywracanie */
+                const vers = listModelVersions(item.sym, tf.id);
+                if(!vers.length) return null;
+                const act = getActiveVersion(item.sym, tf.id);
+                return (
+                  <div style={{marginTop:8, padding:'8px 10px', background:'var(--bg)', border:'1px solid var(--border)', borderRadius:10}}>
+                    <div style={{fontSize:11, color:'var(--dim2)', marginBottom:4}}>Wersje modelu · {item.sym} · {tf.label} (max 3, FIFO)</div>
+                    {vers.slice().reverse().map(({ v, meta }) => (
+                      <div key={v} className="kv" style={{fontSize:11.5}}>
+                        <b className="mono" style={{color: v === act ? 'var(--up)' : 'var(--dim)'}}>
+                          v{v}{v === act ? ' · aktywna' : ''}
+                        </b>
+                        <span className="mono" style={{color:'var(--dim2)'}}>
+                          {meta ? (new Date(meta.at).toLocaleDateString() + ' · n=' + meta.n + ' · OOS ' + (meta.totalNoos != null ? meta.totalNoos : '—')) : '—'}
+                          {v !== act && (
+                            <button className="mono" style={{marginLeft:8, color:'var(--cyan)', background:'none', border:'none', textDecoration:'underline'}}
+                              onClick={() => {
+                                if(activateModelVersion(item.sym, tf.id, v)){ setWv(x => x + 1); Bus.show('↩ Przywrócono model v' + v); }
+                              }}>przywróć</button>
+                          )}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 );
               })()}
@@ -1124,6 +1621,18 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                     </div>
                   ) : (
                     <React.Fragment>
+                      {bt.res.modelUsed && (
+                        <div style={{fontSize:11, lineHeight:1.55, marginBottom:8, padding:'7px 10px', borderRadius:9,
+                          color: bt.res.inSample ? 'var(--ema9)' : 'var(--dim)',
+                          background: bt.res.inSample ? 'rgba(255,201,77,.08)' : 'var(--bg)',
+                          border: '1px solid ' + (bt.res.inSample ? 'rgba(255,201,77,.35)' : 'var(--border)')}} className="mono">
+                          {bt.res.inSample
+                            ? '⚠ Wynik IN-SAMPLE (wagi wyuczone na tej samej historii) — górne liczby są zawyżone. Uczciwy dowód: blok „walk-forward OOS" niżej.'
+                            : bt.res.modelUsed === 'wyuczone'
+                              ? '✓ Model wyuczony i wiarygodny dla tego instrumentu — backtest liczy identycznie jak live.'
+                              : 'Model: wagi DOMYŚLNE — dokładnie to, czego używa live (model niewyuczony/niewiarygodny dla tego instrumentu·TF).'}
+                        </div>
+                      )}
                       <div style={{background:'var(--bg)', border:'1px solid var(--border2)', borderRadius:12, padding:'10px 12px'}}>
                         <div className="kv"><b>Transakcje</b><span className="mono">{bt.res.stats.n} (▲{bt.res.stats.longs} / ▼{bt.res.stats.shorts})</span></div>
                         <div className="kv"><b>Trafność (TP1 vs SL)</b><span className="mono" style={{color: bt.res.stats.winRate >= 40 ? 'var(--up)' : 'var(--down)'}}>{bt.res.stats.winRate.toFixed(0)}%<span style={{color:'var(--dim2)', fontWeight:500}}> ({bt.res.stats.wins}/{bt.res.stats.wins + bt.res.stats.losses})</span></span></div>
@@ -1143,7 +1652,7 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                       {bt.res.trades.slice(-8).reverse().map((t, k) => (
                         <div key={k} className="kv" style={{fontSize:12}}>
                           <b className="mono" style={{color: t.dir > 0 ? 'var(--up)' : 'var(--down)', fontWeight:700}}>
-                            {(t.dir > 0 ? '▲ ' : '▼ ') + (candlesSafe[t.i0] ? fmtFull(candlesSafe[t.i0].t, tf.id) : '')}
+                            {(t.dir > 0 ? '▲ ' : '▼ ') + (() => { const cu = (bt.res.candlesUsed || candlesSafe); return cu[t.i0] ? fmtFull(cu[t.i0].t, tf.id) : ''; })()}
                           </b>
                           <span className="mono" style={{color: t.r > 0 ? 'var(--up)' : t.r < 0 ? 'var(--down)' : 'var(--dim)'}}>
                             {t.out + ' ' + (t.r > 0 ? '+' : '') + t.r + 'R'}
@@ -1154,17 +1663,26 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                   )}
                   {bt.res.wf && bt.res.wf.ok && (
                     <div style={{marginTop:12, background:'var(--bg)', border:'1px solid rgba(79,216,255,.3)', borderRadius:12, padding:'10px 12px'}}>
-                      <div className="section-label" style={{padding:'0 0 6px', color:'var(--cyan)'}}>Walk-forward (uczenie wag)</div>
-                      <div className="kv"><b>In-sample (trening 60%)</b><span className="mono">{bt.res.wf.inSample.n} tr · PF {bt.res.wf.inSample.pf} · {bt.res.wf.inSample.avgR}R</span></div>
-                      <div className="kv"><b>Out-of-sample (test 40%)</b><span className="mono" style={{color: (bt.res.wf.outSample.avgR||0) > 0 ? 'var(--up)' : 'var(--down)', fontWeight:700}}>{bt.res.wf.outSample.n||0} tr · PF {bt.res.wf.outSample.pf||0} · {bt.res.wf.outSample.avgR||0}R</span></div>
-                      <div className="kv"><b>Baseline (wagi domyślne)</b><span className="mono">{bt.res.wf.baseline ? bt.res.wf.baseline.n : '—'} tr · {bt.res.wf.baseline ? bt.res.wf.baseline.avgR : '—'}R</span></div>
-                      {bt.res.wf.oosBrier != null && (
-                        <div className="kv"><b>Brier OOS (kalibracja P)</b><span className="mono" style={{color: bt.res.wf.oosBrier < 0.24 ? 'var(--up)' : 'var(--ema9)'}}>{bt.res.wf.oosBrier}<span style={{color:'var(--dim2)', fontWeight:500}}> (0.25 = moneta)</span></span></div>
+                      <div className="section-label" style={{padding:'0 0 6px', color:'var(--cyan)'}}>Walk-forward k-fold (uczenie wag)</div>
+                      {bt.res.wf.folds.map((f, k) => (
+                        <div className="kv" key={k}><b>Fold {k+1}</b><span className="mono">
+                          {f.skipped ? ('pominięty: ' + f.reason)
+                            : (f.stats.n + ' tr · ' + (f.stats.avgR != null ? f.stats.avgR : '—') + 'R · PF ' + f.stats.pf + (f.brier != null ? ' · Brier ' + f.brier : ''))}
+                        </span></div>
+                      ))}
+                      <div className="kv"><b>OOS łącznie (pooled)</b><span className="mono" style={{color: (bt.res.wf.agg.avgR.med||0) > 0 ? 'var(--up)' : 'var(--down)', fontWeight:700}}>{bt.res.wf.totalNoos} tr · med avgR {bt.res.wf.agg.avgR.med != null ? bt.res.wf.agg.avgR.med : '—'}R · p25 {bt.res.wf.agg.avgR.p25 != null ? bt.res.wf.agg.avgR.p25 : '—'}R</span></div>
+                      {bt.res.wf.agg.brier.p75 != null && (
+                        <div className="kv"><b>Brier p75 (foldy OOS)</b><span className="mono" style={{color: bt.res.wf.agg.brier.p75 < 0.25 ? 'var(--up)' : 'var(--ema9)'}}>{bt.res.wf.agg.brier.p75}<span style={{color:'var(--dim2)', fontWeight:500}}> (0.25 = moneta)</span></span></div>
                       )}
+                      <div className="kv"><b>Kalibracja produkcyjna</b><span className="mono">{bt.res.wf.calib ? ('isotonic z ' + bt.res.wf.oosPairsN + ' par OOS') : ('wyłączona (' + bt.res.wf.oosPairsN + ' par OOS < 150)')}</span></div>
+                      <div className="kv"><b>In-sample (diagnostyka)</b><span className="mono" style={{color:'var(--dim2)'}}>{bt.res.wf.prodInSample.n} tr · {bt.res.wf.prodInSample.avgR}R</span></div>
                       {!bt.res.wf.reliable && (
-                        <div style={{fontSize:10.5, color:'var(--ema9)', marginTop:5, lineHeight:1.55}}>⚠ Próba treningowa n={bt.res.wf.training.n} &lt; 150 lub OOS &lt; 30 transakcji — wynik statystycznie SŁABY. Traktuj jako eksperyment, nie dowód.</div>
+                        <div style={{fontSize:10.5, color:'var(--ema9)', marginTop:5, lineHeight:1.55}}>
+                          ⚠ Model NIEWIARYGODNY — silnik live pozostaje na wagach domyślnych i stałym sizingu.
+                          Niespełnione warunki: {(bt.res.wf.reliableWhy || []).join(' · ') || '—'}.
+                        </div>
                       )}
-                      <div style={{fontSize:10.5, color:'var(--dim2)', marginTop:5, lineHeight:1.55}}>OOS to jedyny uczciwy dowód przewagi. Jeśli OOS PF ≤ 1 lub avgR ≤ 0 — model NIE ma edge na tym instrumencie; nie ufaj wyuczonym wagom. Trening z embargo (bez przecieku etykiet przez granicę splitu), HTF liczony identycznie jak live.</div>
+                      <div style={{fontSize:10.5, color:'var(--dim2)', marginTop:5, lineHeight:1.55}}>Kalibracja isotonic fitowana WYŁĄCZNIE na pooled OOS (nigdy in-sample). Trening z embargo, HTF liczony identycznie jak live. OOS to jedyny uczciwy dowód przewagi.</div>
                     </div>
                   )}
                   <div style={{marginTop:12, fontSize:11, color:'var(--dim2)', lineHeight:1.65}}>
@@ -1186,6 +1704,158 @@ export function ChartScreen({ item, onBack, prefs, setPrefs, ai, setAi, addJourn
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== PEŁNY EKRAN WYKRESU ===================== */}
+      {/* ⚡ modal silnika nadrzędnego MASTER — pełne uzasadnienie decyzji */}
+      {showMaster && master && (() => {
+        const m = master;
+        const dcol = m.dir > 0 ? 'var(--up)' : m.dir < 0 ? 'var(--down)' : 'var(--dim)';
+        const L = m.levels;
+        return (
+          <div className="modal-bg" onClick={() => setShowMaster(false)}>
+            <div className="modal" onClick={e => e.stopPropagation()}>
+              <div style={{display:'flex', alignItems:'center', gap:10, marginBottom:4}}>
+                <span style={{fontWeight:900, fontSize:19, color:dcol}}>⚡ {m.verdict}</span>
+                {m.dir !== 0 && (
+                  <span className="mono" style={{fontSize:12, fontWeight:800, padding:'2px 8px', borderRadius:7, color:'#051b21',
+                    background: m.dir > 0 ? '#2fd6ae' : '#ff6b5e'}}>{m.grade} · {m.confidence}%</span>
+                )}
+                <span style={{flex:1}} />
+                <button className="iconbtn" onClick={() => setShowMaster(false)}><span style={{fontSize:15}}>✕</span></button>
+              </div>
+              <div style={{fontSize:11.5, color:'var(--dim2)', marginBottom:10}}>{m.label}</div>
+
+              <div className="card" style={{marginBottom:8}}>
+                <b style={{fontSize:12}}>Drabina interwałów (top-down)</b>
+                <div style={{display:'flex', gap:6, flexWrap:'wrap', marginTop:7}}>
+                  {m.ladder.map(f => (
+                    <span key={f.id} className="mono" style={{fontSize:11.5, fontWeight:800, padding:'4px 9px', borderRadius:8,
+                      color: f.dir > 0 ? '#2fd6ae' : f.dir < 0 ? '#ff6b5e' : 'var(--dim)',
+                      background:'var(--panel)', border:'1px solid ' + (f.cur ? 'var(--accent)' : 'var(--border2)')}}>
+                      {f.id} {f.dir > 0 ? '▲' : f.dir < 0 ? '▼' : '•'}
+                    </span>
+                  ))}
+                </div>
+                <div className="mono" style={{fontSize:11, color:'var(--dim2)', marginTop:6}}>
+                  zgodność ważona: {(m.align > 0 ? '+' : '') + m.align} — wyższa ramka waży więcej; master nie gra przeciw zgodnej drabinie
+                </div>
+                <div style={{fontSize:10.5, color: m.provisional ? 'var(--ema9)' : 'var(--dim2)', marginTop:5, lineHeight:1.5}}>
+                  {m.provisional
+                    ? '⏳ kanon M15 jeszcze się ładuje — werdykt tymczasowo z oglądanego interwału'
+                    : '🌐 werdykt GLOBALNY: liczony zawsze z kanonu M15 — identyczny niezależnie od tego, który interwał oglądasz'}
+                </div>
+              </div>
+
+              {m.veto && (
+                <div style={{padding:'8px 11px', borderRadius:10, marginBottom:8, fontSize:12, lineHeight:1.5,
+                  background:'rgba(255,201,77,.10)', border:'1px solid rgba(255,201,77,.4)', color:'var(--ema9)'}}>
+                  🛑 {m.veto}
+                </div>
+              )}
+
+              <div className="card" style={{marginBottom:8}}>
+                <b style={{fontSize:12}}>Dlaczego</b>
+                <ul style={{margin:'6px 0 0', paddingLeft:18, fontSize:11.5, lineHeight:1.65, color:'var(--dim)'}}>
+                  {m.reasons.map((r, q) => <li key={q}>{r}</li>)}
+                </ul>
+              </div>
+
+              {L && (
+                <div className="card" style={{marginBottom:8}}>
+                  <b style={{fontSize:12}}>{m.state === 'setup' ? 'Poziomy (setup warunkowy 🏛)' : 'Poziomy wejścia'}</b>
+                  <div className="mono" style={{fontSize:12, marginTop:6, lineHeight:1.7}}>
+                    E {fmtPrice(L.entry)} · SL {fmtPrice(L.sl)}<br/>TP1 {fmtPrice(L.tp1)} · TP2 {fmtPrice(L.tp2)}
+                  </div>
+                  <button className="chip mono sel" style={{width:'100%', justifyContent:'center', padding:'11px', marginTop:9, fontSize:13.5, fontWeight:800,
+                      color: m.dir > 0 ? 'var(--up)' : 'var(--down)',
+                      borderColor: m.dir > 0 ? 'rgba(47,214,174,.5)' : 'rgba(255,107,94,.5)'}}
+                    onClick={() => {
+                      if(tryOpenPaper(m.dir, L.entry, L.sl, L.tp1, L.tp2, m.state === 'setup' ? 'strategy:' + (m.srcStrategy || 'master') : 'signal', m.confidence, signal ? signal.entryQuality : null, signal, m.srcStrategy ? { strategy: m.srcStrategy } : undefined)){
+                        Bus.show('▶ ' + (m.dir > 0 ? 'KUP' : 'SPRZEDAJ') + ' (paper) @ ' + fmtPrice(L.entry));
+                        setShowMaster(false);
+                      }
+                    }}>
+                    ▶ {m.dir > 0 ? 'KUP' : 'SPRZEDAJ'} · paper
+                  </button>
+                </div>
+              )}
+
+              <div style={{display:'flex', gap:8}}>
+                <button className="chip mono" style={{flex:1, justifyContent:'center'}} onClick={() => { setShowMaster(false); setShowSig(true); }}>szczegóły silnika →</button>
+                <button className="chip mono" style={{flex:1, justifyContent:'center', color:'#c792ff', borderColor:'rgba(199,146,255,.4)'}} onClick={() => { setShowMaster(false); setShowStrat(true); }}>🏛 pełny ranking →</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {fs && (
+        <div style={{position:'fixed', inset:0, zIndex:200, background:'var(--bg)', display:'flex', flexDirection:'column'}}>
+          {/* pasek górny: symbol · cena · WERDYKTY (silnik + ranking) · wyjście */}
+          <div style={{display:'flex', alignItems:'center', gap:8, padding:'calc(env(safe-area-inset-top,0px) + 8px) 12px 4px', flexShrink:0, flexWrap:'wrap'}}>
+            <b style={{fontSize:14}}>{item.sym}</b>
+            <span className="mono" style={{fontSize:12.5, color:priceColor, fontWeight:800}}>{fmtPrice(data.price)}</span>
+            {pct != null && <span className="mono" style={{fontSize:11, color:priceColor}}>{fmtPct(pct)}</span>}
+            {data.live && <span style={{color:'var(--up)', fontSize:10, fontWeight:800}}>● LIVE</span>}
+            {/* ⚡ MASTER — jeden werdykt (silnik + ranking + drabina interwałów) */}
+            {master && (
+              <button onClick={() => setShowMaster(true)} className="mono"
+                style={{display:'inline-flex', alignItems:'center', gap:6, padding:'4px 9px', borderRadius:9, fontSize:11.5, fontWeight:800,
+                  color: master.dir > 0 ? '#2fd6ae' : master.dir < 0 ? '#ff6b5e' : '#8fb0ac',
+                  background:'var(--panel)', border:'1px solid ' + (master.dir > 0 ? 'rgba(47,214,174,.4)' : master.dir < 0 ? 'rgba(255,107,94,.4)' : master.veto ? 'rgba(255,201,77,.45)' : 'var(--border2)')}}>
+                ⚡ {master.verdict}
+                {master.dir === 0 && master.lean !== 0 && <span style={{color: master.lean > 0 ? '#2fd6ae' : '#ff6b5e'}}>{master.lean > 0 ? '▲' : '▼'}</span>}
+                {master.dir !== 0 && <span style={{color:'var(--dim)', fontWeight:600}}>{master.grade}·{master.confidence}%</span>}
+                {master.veto && <span style={{fontSize:12}}>🛑</span>}
+              </button>
+            )}
+            <span style={{flex:1}} />
+            <button className="iconbtn" onClick={() => { Net.blockedUntil = 0; load(); }}>
+              <span className={loading ? 'spin' : ''} style={{display:'flex'}}><Ic d={IC.refresh} size={17} /></span>
+            </button>
+            <button className="iconbtn" title="Wyjdź z pełnego ekranu" onClick={() => setFs(false)}>
+              <span style={{fontSize:16, lineHeight:1}}>✕</span>
+            </button>
+          </div>
+          {/* TF chips + KUP/SPRZEDAJ w jednym pasku (oszczędza pion w poziomie) */}
+          <div style={{display:'flex', alignItems:'center', gap:6, padding:'0 12px 4px', flexShrink:0}}>
+            <div className="chiprow" style={{padding:0, flex:1}}>
+              {TFS.map(t => (
+                <button key={t.id} className={'chip mono' + (t.id === tf.id ? ' sel' : '')}
+                  onClick={() => setPrefs(p => ({ ...p, tf:t.id }))}>{t.label}</button>
+              ))}
+            </div>
+            {candlesSafe.length > 0 && (
+              <>
+                <button className="chip mono" style={{padding:'7px 12px', fontWeight:800, color:'var(--up)', borderColor:'rgba(47,214,174,.5)', flexShrink:0}}
+                  onClick={() => openTicket(1)}>▲ KUP</button>
+                <button className="chip mono" style={{padding:'7px 12px', fontWeight:800, color:'var(--down)', borderColor:'rgba(255,107,94,.5)', flexShrink:0}}
+                  onClick={() => openTicket(-1)}>▼ SPRZEDAJ</button>
+              </>
+            )}
+          </div>
+          {/* wykres wypełnia resztę — bez pływających paneli, nic nie zasłania świec */}
+          <div style={{flex:1, position:'relative', minHeight:0}}>
+            <ChartCanvas
+              key={'fs|' + item.sym + '|' + tf.id}
+              candles={candlesSafe}
+              emaData={emaData}
+              emaVis={prefs.emaVis}
+              tfId={tf.id}
+              hasVol={hasVol}
+              overlays={overlays}
+              panels={panels}
+              markers={iprefs.form ? patterns.markers : null}
+              geoLines={iprefs.form ? patterns.geoDraw : null}
+              patMap={patterns.patMap}
+              focus={focus}
+              levels={sigLevels}
+              posMarkers={posMarkers}
+              resetKey={'fs|' + item.sym + '|' + tf.id}
+            />
           </div>
         </div>
       )}

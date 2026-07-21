@@ -1,16 +1,17 @@
-import { spreadPx } from '../constants/instruments.js';
-import { getChart, htfTrend } from '../data/feed.js';
+import { getChart, htfTrend, TF_SEC } from '../data/feed.js';
 import { EMA_DEFS, adxSeries, atrSeries, bollSeries, emaSeries, findSRZones, macdSeries, obvSeries, rsiSeries, stochSeries, vwapSeries } from '../indicators/index.js';
 import { detectPatterns, zigzag } from '../patterns/index.js';
 import { displacement, relativeVolume, smcAnalyze } from '../smc/index.js';
-import { sessionInfo } from '../utils/sessions.js';
+import { sessionInfo, macroWindow } from '../utils/sessions.js';
 import { buildPullbackPlan } from './pullback.js';
 import { buildOpportunities } from './opportunities.js';
 import { classifyRegime } from './regime.js';
 import { extractFactors, orientedVector } from './features.js';
-import { predictProb, expectedValueR, applyIsotonic } from './model.js';
-import { similarOutcomes, blendProb } from './similarity.js';
-import { liquidityModel, drawOnLiquidity } from './liquidity.js';
+import { predictProb, applyIsotonic } from './model.js';
+import { pillarGate, htfContraGate, regimeGate, chaseGate, evGate, sessionGate } from './gates.js';
+import { computeLevels } from './levels.js';
+import { similarOutcomes } from './similarity.js';
+import { liquidityModel } from './liquidity.js';
 import { volumeProfile } from './volumeProfile.js';
 import { positionSizing } from './sizing.js';
 import { instrProfile } from '../constants/instruments.js';
@@ -25,12 +26,23 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   const livePrice = candles[n-1] ? candles[n-1].c : null;
   const i = isLive ? n - 2 : atIdx;
   if(!ind || i < 30) return null;
+  /* [E3-1] TWARDA bramka świeżości danych: świece starsze niż 2×TF+90 s
+     nie mogą produkować sygnału (badge w UI to za mało — decyzja na starych
+     danych jest gorsza niż brak decyzji) */
+  if(isLive && srOverride && srOverride.__tfSec){
+    const lastT = candles[n-1] ? candles[n-1].t : null;
+    if(lastT && (Date.now()/1000 - lastT) > srOverride.__tfSec*2 + 90){
+      return { stale:true, dir:0, score:0, prob:0.5, reasons:[], warns:['⛔ Dane nieaktualne (świeca starsza niż 2×TF+90 s) — sygnał wstrzymany do odświeżenia feedu'], session:null };
+    }
+  }
   const c = candles[i];
   const price = isLive ? (livePrice != null ? livePrice : c.c) : c.c;
   const v = a => (a && a[i] != null) ? a[i] : null;
   let atr = v(ind.atr);
   if(atr == null){
-    for(let q=ind.atr.length-1;q>=0;q--){ if(ind.atr[q] != null){ atr = ind.atr[q]; break; } }
+    /* [A10] fallback ATR wstecz OD i — skan od końca serii był formalnym
+       lookaheadem w backteście (ATR z przyszłości względem świecy i) */
+    for(let q=i;q>=0;q--){ if(ind.atr[q] != null){ atr = ind.atr[q]; break; } }
   }
   if(!atr) return null;
 
@@ -38,9 +50,18 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   const cfg = (srOverride && srOverride.__smc) || {
     premium:62, discount:38, dispImpulse:1.2, dispBody:0.6, fvgDist:0.5, strong:55, rangeBonus:15, minRR:1.5,
   };
+  /* [E2-1] flagi ablacyjne: truthy = element WYŁĄCZONY z toru decyzyjnego
+     (harness mierzy, czy element w ogóle zarabia) */
+  const ablate = (srOverride && srOverride.__ablate) || null;
+
   /* ---- SMC / struktura rynku (zero lookahead: piwoty tylko do i) ---- */
   const _piv = zigzag(candles.slice(0, i+1), ind.atr.slice(0, i+1));
-  const smc = smcAnalyze(candles, _piv, i, atr, cfg);
+  const smcRaw = smcAnalyze(candles, _piv, i, atr, cfg);
+  const smc = (ablate && ablate.smc)
+    ? { ms:null, bc:{ bos:0, choch:0, txt:'' }, pd:{ zone:null, pct:null },
+        fvg:{ nearest:null, nearDistAtr:null }, sweep:null, ob:null, disp:0,
+        eq:{ eqHigh:null, eqLow:null } }
+    : smcRaw;
   const relVol = hasVol ? relativeVolume(candles, i) : null;
 
   const reasons = [];
@@ -295,48 +316,54 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     stochK: k, stochD: d, stochKp: kp, stochDp: dp, vw, smc, nearSup, nearRes,
     relVol: relVol ? { ...relVol, dir: (c.c >= c.o ? 1 : -1) } : null,
     htfDir, liquidity: liq,
-  });
-  const weights = (srOverride && srOverride.__weights) || null;
+  }, ablate);
+  /* [A3] wagi/kalibracja TYLKO przy jawnym __reliable — bez tego skaner tła
+     i wykres mogłyby liczyć na różnych modelach (alert ≠ sygnał na wykresie) */
+  const modelOn = !!(srOverride && srOverride.__reliable && srOverride.__weights);
+  const weights = modelOn ? srOverride.__weights : null;
 
   let dir = factors.dirConsensus > 0.06 ? 1 : factors.dirConsensus < -0.06 ? -1 : 0;
 
   /* wymóg zgody min. 2 z 3 filarów (deconfounding kierunku) */
-  if(dir === 1 && bullPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — LONG odrzucony'); }
-  if(dir === -1 && bearPillars < 2){ dir = 0; warns.push('Za mało zgodnych filarów (struktura/momentum/lokalizacja) — SHORT odrzucony'); }
+  if(!(ablate && ablate.pillarGate)){
+    const g = pillarGate(dir, bullPillars, bearPillars);
+    if(g.warn) warns.push(g.warn);
+    dir = g.dir;
+  }
 
   /* P(win | dir) z modelu + kalibracja isotonic (jeśli wyuczona z ≥150 próbek) */
-  const calibMap = (srOverride && srOverride.__calib) || null;
+  const calibMap = modelOn ? (srOverride.__calib || null) : null;
   let prob = dir !== 0 ? predictProb(orientedVector(factors, dir), weights) : 0.5;
   if(dir !== 0 && calibMap) prob = applyIsotonic(prob, calibMap);
 
-  /* Similarity Engine (kNN): "co robiły podobne historyczne setupy" —
-     nieliniowa, empiryczna korekta P (wpływ ograniczony, maks ~35%) */
+  /* Similarity Engine (kNN): WYŁĄCZNIE diagnostyka UI [A2]. k-fold nigdy nie
+     przekazuje __knn do przebiegów foldowych, więc mieszanie kNN w live
+     oznaczałoby, że certyfikat "reliable" dotyczy innego systemu niż ten,
+     który handluje (brak parytetu validate↔serve). prob NIE jest korygowane. */
   const knnHist = (srOverride && srOverride.__knn) || null;
   let similar = null;
   if(dir !== 0 && knnHist && knnHist.length >= 40){
     similar = similarOutcomes(knnHist, orientedVector(factors, dir), 20);
-    if(similar) prob = blendProb(prob, similar);
   }
 
   /* blokada kontry HTF przy niskim P(win) */
-  if(dir !== 0 && htfDir !== 0 && dir !== htfDir && prob < 0.66){
-    warns.push('Sygnał przeciw wyższemu interwałowi przy niskim P(win) — odrzucony');
-    dir = 0;
+  if(!(ablate && ablate.htfGate)){
+    const g = htfContraGate(dir, htfDir, prob);
+    if(g.warn) warns.push(g.warn);
+    dir = g.dir;
   }
   /* reżim konsolidacji: setup trendowy wymaga wyższego P(win) */
-  if(dir !== 0 && regime.type === 'range' && prob < 0.60){
-    warns.push('Reżim konsolidacji (ADX/efektywność niskie) — setup trendowy za słaby, odrzucony');
-    dir = 0;
+  {
+    const g = regimeGate(dir, regime.type, prob);
+    if(g.warn) warns.push(g.warn);
+    dir = g.dir;
   }
 
   const waitPB = !!(srOverride && srOverride.__waitPullback);
-  if(dir !== 0 && eqChase && prob < 0.66){
-    if(waitPB){
-      warns.push('Cena ' + (bestDist != null ? bestDist.toFixed(1) : '?') + '×ATR od ' + bestName + ' — gonienie ruchu, wstrzymane do cofnięcia');
-      dir = 0;
-    } else {
-      warns.push('Cena ' + (bestDist != null ? bestDist.toFixed(1) : '?') + '×ATR od ' + bestName + ' — wejście „w biegu", rozważ cofnięcie');
-    }
+  {
+    const g = chaseGate(dir, eqChase, prob, waitPB, bestDist, bestName);
+    if(g.warn) warns.push(g.warn);
+    dir = g.dir;
   }
 
   const out = {
@@ -347,75 +374,18 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     warns,
   };
 
-  /* poziomy: SL za realnym SWINGIEM (SMC), TP na STRUKTURZE, twardy gate RR≥1.5 */
+  /* poziomy: SL za realnym SWINGIEM (SMC), TP na STRUKTURZE, twardy gate RR≥1.5
+     — wydzielone do signals/levels.js [E3-6] */
   if(dir !== 0){
-    const entry = price;
-    const symForCost = (srOverride && srOverride.__sym) || null;
-    const prof = instrProfile(symForCost);
-    const spr = symForCost ? spreadPx(symForCost, price) : atr*0.05;
-    const wick = atr*prof.slWick; // bufor na stop-hunt (per instrument)
-
-    /* --- STOP LOSS: za ostatnim swingiem struktury + bufor + spread --- */
-    let slDist;
-    if(smc.ms){
-      if(dir === 1){
-        const swing = Math.min(smc.ms.lastSwingLow.p, nearSup ? nearSup.lo : Infinity);
-        slDist = (entry - swing) + wick + spr;
-      } else {
-        const swing = Math.max(smc.ms.lastSwingHigh.p, nearRes ? nearRes.hi : -Infinity);
-        slDist = (swing - entry) + wick + spr;
-      }
+    const lv = computeLevels({
+      dir, price, atr, smc, nearSup, nearRes, liq, vp, cfg,
+      sym: (srOverride && srOverride.__sym) || null,
+    });
+    if(!lv.levels){
+      warns.push(lv.rrBlockWarn);
+      out.dir = 0; dir = 0; out.rrBlock = true;
     } else {
-      slDist = (dir === 1 && nearSup) ? (price - nearSup.lo + wick + spr)
-             : (dir === -1 && nearRes) ? (nearRes.hi - price + wick + spr)
-             : atr*1.1;
-    }
-    /* tylko dolna klamra (nie ściskamy SL PRZED realny swing — invalidacja
-       ma być za strukturą; zbyt daleki swing reguluje sizing, nie ucięty SL) */
-    slDist = Math.max(atr*0.5, slDist);
-    const sl = dir === 1 ? entry - slDist : entry + slDist;
-
-    /* --- TAKE PROFIT: najbliższy magnes płynności / strefa / swing przeciwny --- */
-    const targets = [];
-    const draw = drawOnLiquidity(liq, entry, dir); // PDH/PDL/dzienne high-low = magnes płynności
-    if(dir === 1){
-      if(smc.eq.eqHigh && smc.eq.eqHigh > entry) targets.push({ px:smc.eq.eqHigh, why:'equal highs (płynność)' });
-      if(draw && draw.px > entry) targets.push({ px:draw.px, why:draw.label + ' (draw on liquidity)' });
-      if(nearRes && nearRes.lo > entry) targets.push({ px:nearRes.lo, why:'strefa oporu' });
-      if(vp && vp.vah > entry) targets.push({ px:vp.vah, why:'VAH (profil wolumenu)' });
-      if(smc.ms && smc.ms.lastSwingHigh.p > entry) targets.push({ px:smc.ms.lastSwingHigh.p, why:'poprzedni swing high' });
-    } else {
-      if(smc.eq.eqLow && smc.eq.eqLow < entry) targets.push({ px:smc.eq.eqLow, why:'equal lows (płynność)' });
-      if(draw && draw.px < entry) targets.push({ px:draw.px, why:draw.label + ' (draw on liquidity)' });
-      if(nearSup && nearSup.hi < entry) targets.push({ px:nearSup.hi, why:'strefa wsparcia' });
-      if(vp && vp.val < entry) targets.push({ px:vp.val, why:'VAL (profil wolumenu)' });
-      if(smc.ms && smc.ms.lastSwingLow.p < entry) targets.push({ px:smc.ms.lastSwingLow.p, why:'poprzedni swing low' });
-    }
-    targets.sort((a,b) => Math.abs(a.px-entry) - Math.abs(b.px-entry));
-    const structTP = targets[0] || null;
-
-    const rrTo = px => (Math.abs(px - entry) - spr) / slDist;
-    const minRR = prof.minRR || (cfg.minRR != null ? cfg.minRR : 1.5);
-    let tp1, tp1why, rr1;
-    if(structTP && rrTo(structTP.px) >= minRR){
-      tp1 = structTP.px; tp1why = structTP.why; rr1 = +rrTo(structTP.px).toFixed(2);
-    } else {
-      tp1 = dir === 1 ? entry + slDist*minRR + spr : entry - slDist*minRR - spr; tp1why = 'RR ' + minRR + 'R'; rr1 = minRR;
-    }
-    const tp2 = targets[1] ? targets[1].px : (dir === 1 ? entry + slDist*2.5 + spr : entry - slDist*2.5 - spr);
-    const rr2 = +rrTo(tp2).toFixed(2);
-
-    /* --- TWARDY GATE: struktura blisko blokuje RR<min → sygnał odrzucony --- */
-    if(structTP && rrTo(structTP.px) < minRR){
-      const blocks = dir === 1 ? (structTP.px < entry + slDist*minRR) : (structTP.px > entry - slDist*minRR);
-      if(blocks){
-        warns.push('Najbliższa struktura (' + structTP.why + ') daje RR ' + rrTo(structTP.px).toFixed(2) + ' < ' + minRR + ' — setup odrzucony (brak miejsca do celu)');
-        out.dir = 0; dir = 0; out.rrBlock = true;
-      }
-    }
-
-    if(dir !== 0){
-      out.levels = { entry, sl, tp1, tp2, slDist, rr1, rr2, tp1why, spreadPx:+spr.toFixed(6) };
+      out.levels = lv.levels;
       if(bestDist != null){
         out.entryQuality = {
           dist: +bestDist.toFixed(2), anchor: bestName, grade: eqGrade,
@@ -428,17 +398,39 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
     }
   }
 
-  /* --- EV GATE + prob + sizing (Engine v2): akceptacja z prawdopodobieństwa, nie z sumy punktów --- */
+  /* okna makro w czasie LOKALNYM rynków [A6] — liczone PRZED bramką EV,
+     bo w oknie koszt spreadu realnie rośnie [E3-3] */
+  const profMw = instrProfile((srOverride && srOverride.__sym) || null);
+  const mwDt = isLive ? new Date() : new Date(c.t*1000);
+  const mw = macroWindow(mwDt);
+  if(mw){
+    out.macroWindow = mw;
+    if(profMw.macro){
+      out.autoTradeBlock = true; // [E3-3] automat NIE otwiera w oknie makro
+      if(atIdx == null) warns.push('Okno makro: ' + mw + ' — spread/poślizg ×kilka, AUTO-TRADE zablokowany; wejście ręczne tylko świadomie');
+    } else if(atIdx == null){
+      warns.push('Okno makro: ' + mw + ' — podwyższona zmienność (instrument 24/7, wejścia nieblokowane)');
+    }
+  }
+
+  /* --- EV GATE + prob + sizing (Engine v2) — signals/gates.js [E3-6]:
+     [A4] EV z empirycznej dystrybucji wypłat (payout z pooled OOS), fallback
+     liniowy; [E3-3] w oknie makro koszt spreadu ×4 --- */
   if(out.dir !== 0 && out.levels){
-    const costR = out.levels.slDist > 0 ? (out.levels.spreadPx / out.levels.slDist) : 0;
-    const ev = expectedValueR(prob, out.levels.rr1 || 1.5, costR);
     const minProb = (srOverride && srOverride.__minProb != null) ? srOverride.__minProb : 0.52;
-    out.ev = +ev.toFixed(3);
-    if(prob < minProb || ev <= 0){
-      warns.push('Odrzucony przez EV/prob: P(win) ' + Math.round(prob*100) + '% · EV ' + ev.toFixed(2) + 'R (próg P ' + Math.round(minProb*100) + '%, wymagane EV>0)');
+    const g = evGate(prob, out.levels, (srOverride && srOverride.__payout) || null,
+      (out.macroWindow && profMw.macro) ? 4 : 1, minProb);
+    out.evModel = g.evModel;
+    out.ev = +g.ev.toFixed(3);
+    if(!g.pass){
+      warns.push(g.warn);
       out.dir = 0; dir = 0; delete out.levels; out.evBlock = true;
     } else {
-      out.sizing = positionSizing(prob, out.levels.rr1 || 1.5, { volState: regime.volState });
+      /* [E4-2] sizing z kosztem i trybem obronnym (drawdown dziennika) */
+      out.sizing = positionSizing(prob, out.levels.rr1 || 1.5, {
+        volState: regime.volState, costR: g.costR,
+        ddR: (srOverride && srOverride.__ddR) || 0,
+      });
     }
   }
   out.prob = +prob.toFixed(3);
@@ -454,25 +446,7 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   out.liquidityLevels = { pdh: liq.pdh, pdl: liq.pdl, todayHigh: liq.todayHigh, todayLow: liq.todayLow };
   if(vp) out.vp = vp;
 
-  /* okna makro / otwarcia sesji (czas lokalny) — INFORMACYJNIE (bez blokady wejść) */
-  const dt = new Date();
-  const hm = dt.getHours()*60 + dt.getMinutes();
-  const wins = [
-    [9*60,        9*60+15,  'otwarcie DAX 09:00'],
-    [14*60+22,    14*60+42, 'publikacje USA 14:30'],
-    [15*60+25,    15*60+45, 'otwarcie Wall Street 15:30'],
-    [15*60+52,    16*60+12, 'dane USA 16:00'],
-    [19*60+52,    20*60+15, 'FOMC / minutes 20:00'],
-  ];
-  for(let q=0;q<wins.length;q++){
-    if(hm >= wins[q][0] && hm <= wins[q][1]){
-      out.macroWindow = wins[q][2];
-      if(atIdx == null){
-        warns.push('Okno makro: ' + wins[q][2] + ' — podwyższona zmienność (wejścia NIE są blokowane, uważaj na szarpnięcia)');
-      }
-      break;
-    }
-  }
+  /* (okna makro liczone wyżej, przed bramką EV — [E3-3]) */
 
   /* --- FILTR SESJI — cienki rynek = więcej fałszywych ruchów.
      Teraz SPÓJNIE live i backtest (czas ze świecy) + per instrument (crypto 24/7). --- */
@@ -481,16 +455,14 @@ export function computeSignal(candles, ind, emaData, patterns, hasVol, atIdx, sr
   const sessDt = isLive ? new Date() : new Date(c.t*1000);
   const sess = sessionInfo(sessDt);
   out.session = { label: sess.label, quality: sess.quality };
-  if(profG.sessionSensitive && out.dir !== 0){
-    if(sess.weekend){
-      warns.push('Rynek zamknięty (' + sess.label + ') — wejście zablokowane');
+  if(profG.sessionSensitive && out.dir !== 0 && !(ablate && ablate.session)){
+    const g = sessionGate(sess, prob);
+    if(g.action === 'block'){
+      warns.push(g.warn);
       out.dir = 0; out.sessionBlock = true; delete out.levels;
-    } else if(sess.quality < 0 && prob < 0.66){
-      warns.push('Słabe okno płynności: ' + sess.label + ' — sygnał wstrzymany (graj w London/NY albo czekaj na mocny setup)');
-      out.dir = 0; out.sessionBlock = true; delete out.levels;
-    } else if(sess.quality < 0){
-      warns.push('Słabe okno płynności: ' + sess.label + ' — traktuj ostrożnie, cieńszy rynek');
-    } else if(sess.overlap){
+    } else if(g.action === 'warn'){
+      warns.push(g.warn);
+    } else if(g.action === 'bonus'){
       out.reasons.push({ pts: (out.dir>0?1:-1)*4, txt:'Overlap London×NY — najlepsza płynność dnia' });
     }
   }
@@ -553,7 +525,7 @@ export function indicatorsFor(candles, tfId){
   for(let i=0;i<EMA_DEFS.length;i++){ emaData[EMA_DEFS[i].n] = emaSeries(closes, EMA_DEFS[i].n); }
   return { ind, emaData, hasVol };
 }
-export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, smcCfg, weights, calib){
+export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, smcCfg, weights, calib, reliable, payout){
   const data = await getChart(symbol, tf, source);
   if(!data || !data.candles || data.candles.length < 30) return { data, signal:null };
   const pack = indicatorsFor(data.candles, tf.id);
@@ -571,6 +543,10 @@ export async function analyzeSymbol(symbol, tf, source, minScore, waitPullback, 
   srWithHtf.__smc = smcCfg || null;
   srWithHtf.__weights = weights || null;
   srWithHtf.__calib = calib || null;
+  /* [A3] skaner tła musi używać modelu na tych samych zasadach co wykres */
+  srWithHtf.__reliable = !!reliable && !!weights;
+  srWithHtf.__payout = payout || null;
+  srWithHtf.__tfSec = TF_SEC[tf.id] || 300; // [E3-1] bramka stale także w skanerze
   const signal = computeSignal(data.candles, pack.ind, pack.emaData, patterns, pack.hasVol, null, srWithHtf);
   return { data, signal, demo: !!data.demo };
 }

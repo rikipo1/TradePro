@@ -1,4 +1,8 @@
 /* ---------------- Historical Similarity Engine (kNN) ----------------
+   @decision-path: excluded [A2] — kNN NIE wpływa na out.prob ani na żadną
+   bramkę decyzyjną; służy wyłącznie diagnostyce UI (out.similar). Powód:
+   walidacja k-fold nie przekazuje __knn, więc system z kNN w torze
+   decyzyjnym nie byłby tym systemem, który został zwalidowany.
    "Czy rynek wyglądał już tak wcześniej i co się wtedy stało?"
    Zamiast ufać wyłącznie modelowi liniowemu, szukamy K najbliższych
    HISTORYCZNYCH sytuacji (po wektorze cech zorientowanym na kierunek)
@@ -37,8 +41,9 @@ export function similarOutcomes(history, x, K = 20) {
   };
 }
 
-/* mieszanie z modelem: wpływ kNN rośnie z liczbą i bliskością analogów,
-   ale jest twardo ograniczony (maxLambda) — kNN koryguje, nie przejmuje. */
+/* mieszanie z modelem — NIEUŻYWANE w torze decyzyjnym od [A2].
+   Zostawione wyłącznie dla ewentualnej przyszłej walidacji (musiałaby
+   przekazywać __knn także w przebiegach foldowych k-fold). */
 export function blendProb(pModel, sim, maxLambda = 0.35) {
   if (!sim || !sim.n) return pModel;
   const lam = Math.min(maxLambda, sim.n / (sim.n + 20)) * Math.exp(-Math.min(2, sim.avgDist));
